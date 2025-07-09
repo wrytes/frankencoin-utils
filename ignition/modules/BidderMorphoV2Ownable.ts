@@ -13,6 +13,7 @@ export type DeploymentParams = {
 	zchf: Address;
 	hubV2: Address;
 	owner: Address;
+	feePPM: number;
 };
 
 export const params: DeploymentParams = {
@@ -21,11 +22,19 @@ export const params: DeploymentParams = {
 	zchf: '0xB58E61C3098d85632Df34EecfB899A1Ed80921cB',
 	hubV2: '0xDe12B620A8a714476A97EfD14E6F7180Ca653557',
 	owner: '0x220B613fE70bf228C11F781A1d2bAEEA34f71809',
+	feePPM: 200_000,
 };
 
-export type ConstructorArgs = [Address, Address, Address, Address, Address];
+export type ConstructorArgs = [Address, Address, Address, Address, Address, number];
 
-export const args: ConstructorArgs = [params.morpho, params.uniswap, params.zchf, params.hubV2, params.owner];
+export const args: ConstructorArgs = [
+	params.morpho,
+	params.uniswap,
+	params.zchf,
+	params.hubV2,
+	params.owner,
+	params.feePPM,
+];
 
 console.log('Imported Params:');
 console.log(params);

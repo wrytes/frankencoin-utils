@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import {Math} from '@openzeppelin/contracts/utils/math/Math.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
-import {Ownable} from '@openzeppelin/contracts/access/Ownable.sol';
+import {Ownable, Ownable2Step} from '@openzeppelin/contracts/access/Ownable2Step.sol';
 
 import {ISwapRouter} from '@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol';
 
@@ -20,8 +20,8 @@ import {IPositionV2} from './frankencoin/IPositionV2.sol';
 /// @notice Executes bids on MintingHub V2 using Morpho flash loans and Uniswap V3 swaps.
 /// @dev This contract leverages Morpho flash loans to acquire assets for bidding,
 /// performs swaps via Uniswap V3 to repay the loan, and captures profit from the price spread.
-/// Ownership is used for administrative control.
-contract BidderMorphoV2Ownable is Ownable, IMorphoFlashLoanCallback {
+/// Ownable2Step is used for profit distribution.
+contract BidderMorphoV2Ownable is Ownable2Step, IMorphoFlashLoanCallback {
 	using Math for uint256;
 	using SafeERC20 for IERC20;
 
@@ -31,13 +31,18 @@ contract BidderMorphoV2Ownable is Ownable, IMorphoFlashLoanCallback {
 	IERC20 private immutable zchf;
 	IMintingHubV2Bidder private immutable hub;
 
+	// variables
+	uint32 public feePPM;
+
 	// private
+	address private _sender;
 	uint32 private _index;
 	address private _collateral;
 	uint256 private _size;
 	bytes private _path;
 
 	// events
+	event SetFee(uint32 feePPM);
 	event Executed(address indexed collateral, uint256 flashBid, uint256 swapIn, uint256 swapOut);
 
 	// errors
@@ -48,11 +53,19 @@ contract BidderMorphoV2Ownable is Ownable, IMorphoFlashLoanCallback {
 
 	// ---------------------------------------------------------------------------------------
 
-	constructor(address _morpho, address _uniswap, address _zchf, address _hubV2, address _owner) Ownable(_owner) {
+	constructor(
+		address _morpho,
+		address _uniswap,
+		address _zchf,
+		address _hubV2,
+		address _owner,
+		uint32 _feePPM
+	) Ownable(_owner) {
 		morpho = IMorpho(_morpho);
 		uniswap = ISwapRouter(_uniswap);
 		zchf = IERC20(_zchf);
 		hub = IMintingHubV2Bidder(_hubV2);
+		_setFeePPM(_feePPM);
 	}
 
 	// ---------------------------------------------------------------------------------------
@@ -75,13 +88,31 @@ contract BidderMorphoV2Ownable is Ownable, IMorphoFlashLoanCallback {
 
 	// ---------------------------------------------------------------------------------------
 
+	/// @notice Sets the fee in parts per million (PPM).
+	/// @dev Calls the internal _setFeePPM function. Only callable by the contract owner.
+	/// @param _fee The new fee to set, in PPM (1,000,000 PPM = 100%).
+	function setFeePPM(uint32 _fee) external onlyOwner {
+		_setFeePPM(_fee);
+	}
+
+	/// @notice Internal function to set the fee, capped at 1,000,000 PPM (100%).
+	/// @dev Emits a {SetFee} event with the final fee value.
+	/// @param _fee The proposed fee value in PPM.
+	function _setFeePPM(uint32 _fee) internal {
+		if (_fee > 1_000_000) feePPM = 1_000_000;
+		else feePPM = _fee;
+		emit SetFee(feePPM);
+	}
+
+	// ---------------------------------------------------------------------------------------
+
 	/// @notice Executes a challenge using raw token/fee arrays by encoding the path internally.
 	/// @dev Encodes the swap path from `tokens` and `fees`, then calls the internal `_execute`.
 	/// @param index The challenge index to execute.
 	/// @param amount The collateral amount to take (0 for max).
 	/// @param tokens An array of token addresses for the swap path.
 	/// @param fees An array of Uniswap pool fees between each hop.
-	function executeRaw(uint32 index, uint256 amount, address[] memory tokens, uint24[] memory fees) external {
+	function execute(uint32 index, uint256 amount, address[] memory tokens, uint24[] memory fees) external {
 		_path = encodePath(tokens, fees);
 		_execute(index, amount);
 	}
@@ -120,6 +151,7 @@ contract BidderMorphoV2Ownable is Ownable, IMorphoFlashLoanCallback {
 		uint256 assets = (size * price) / 1 ether;
 
 		// store data
+		_sender = msg.sender;
 		_index = index;
 		_collateral = address(position.collateral());
 		_size = size;
@@ -130,7 +162,14 @@ contract BidderMorphoV2Ownable is Ownable, IMorphoFlashLoanCallback {
 		// execute zchf flash loan action
 		morpho.flashLoan(address(zchf), assets, emptyData);
 
+		// transfer profits with owner and sender
+		uint256 balance = zchf.balanceOf(address(this));
+		uint256 split = (balance * feePPM) / 1_000_000;
+		zchf.transfer(owner(), split);
+		zchf.transfer(_sender, balance - split);
+
 		// clear data
+		delete _sender;
 		delete _index;
 		delete _collateral;
 		delete _size;
@@ -162,9 +201,6 @@ contract BidderMorphoV2Ownable is Ownable, IMorphoFlashLoanCallback {
 		// forceApprove and execute swap
 		IERC20(_collateral).forceApprove(address(uniswap), _size);
 		uint256 amountOut = uniswap.exactInput(params);
-
-		// transfer profit to owner
-		zchf.transfer(owner(), amountOut - assets);
 
 		// forceApprove for flashloan repayment
 		zchf.forceApprove(address(morpho), assets);

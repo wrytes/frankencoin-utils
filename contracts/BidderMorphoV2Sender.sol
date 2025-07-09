@@ -14,7 +14,7 @@ import {IFrankencoin} from './frankencoin/IFrankencoin.sol';
 import {IMintingHubV2Bidder} from './frankencoin/IMintingHubV2Bidder.sol';
 import {IPositionV2} from './frankencoin/IPositionV2.sol';
 
-contract BidderMorphoV2 is IMorphoFlashLoanCallback {
+contract BidderMorphoV2Sender is IMorphoFlashLoanCallback {
 	using Math for uint256;
 	using SafeERC20 for IERC20;
 
