@@ -16,7 +16,6 @@ import {IMintingHubV2Bidder} from './frankencoin/IMintingHubV2Bidder.sol';
 import {IPositionV2} from './frankencoin/IPositionV2.sol';
 
 /// @title BidderMorphoV2Ownable
-/// @author @samclassix <samclassix@proton.me>, @wrytlabs <wrytlabs@proton.me>
 /// @notice Executes bids on MintingHub V2 using Morpho flash loans and Uniswap V3 swaps.
 /// @dev This contract leverages Morpho flash loans to acquire assets for bidding,
 /// performs swaps via Uniswap V3 to repay the loan, and captures profit from the price spread.
