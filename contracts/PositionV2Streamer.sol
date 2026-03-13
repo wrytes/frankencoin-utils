@@ -100,6 +100,13 @@ contract PositionV2Streamer is ExecuteOwnable {
 		}
 
 		IERC20 collateral = IERC20(address(IPositionV2(source).collateral()));
+		uint256 bal = collateral.balanceOf(address(this));
+
+		if (bal > 0) {
+			// fund with max collateral
+			collateral.safeTransfer(source, bal);
+		}
+
 		collateral.forceApprove(address(roller), type(uint256).max);
 		roller.rollFullyWithExpiration(
 			IPositionV2(source),

@@ -159,6 +159,36 @@ describe('PositionV2Streamer', function () {
 			expect(balance).to.be.gte(0n);
 		});
 
+		it('owner can manually roll a position via execute', async function () {
+			const collateralAddr = await new ethers.Contract(
+				SOURCE_POSITION,
+				['function collateral() view returns (address)'],
+				ethers.provider
+			).collateral();
+
+			const approveIface = new ethers.Interface(['function approve(address,uint256) returns (bool)']);
+			const rollerIface = new ethers.Interface(['function rollFullyWithExpiration(address,address,uint40) external']);
+
+			const streamPeriod = await streamer.streamPeriod();
+			const block = await ethers.provider.getBlock('latest');
+			const newExpiration = BigInt(block!.timestamp) + streamPeriod;
+
+			const actions = [
+				{
+					to: collateralAddr,
+					value: 0n,
+					data: approveIface.encodeFunctionData('approve', [ROLLER_V2, ethers.MaxUint256]),
+				},
+				{
+					to: ROLLER_V2,
+					value: 0n,
+					data: rollerIface.encodeFunctionData('rollFullyWithExpiration', [SOURCE_POSITION, TARGET_POSITION, newExpiration]),
+				},
+			];
+
+			await expect(streamer.connect(owner).execute.staticCall(actions, 0n)).to.not.be.rejected;
+		});
+
 		it('non-owner reverts', async function () {
 			await expect(streamer.connect(bot).execute([], 0n)).to.be.revertedWithCustomError(
 				streamer,
