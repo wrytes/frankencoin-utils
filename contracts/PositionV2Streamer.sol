@@ -99,9 +99,13 @@ contract PositionV2Streamer is ExecuteOwnable {
 			revert TooEarlyToStream(sourceExpiration, streamThreshold);
 		}
 
-		IERC20 collateral = IPositionV2(source).collateral();
+		IERC20 collateral = IERC20(address(IPositionV2(source).collateral()));
 		collateral.forceApprove(address(roller), type(uint256).max);
-		roller.rollFullyWithExpiration(IPositionV2(source), IPositionV2(target), uint40(block.timestamp) + streamPeriod);
+		roller.rollFullyWithExpiration(
+			IPositionV2(source),
+			IPositionV2(target),
+			uint40(block.timestamp) + streamPeriod
+		);
 		collateral.forceApprove(address(roller), 0);
 
 		if (streamReward > 0) {

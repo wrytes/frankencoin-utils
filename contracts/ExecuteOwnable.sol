@@ -26,7 +26,7 @@ abstract contract ExecuteOwnable is Ownable2Step, ReentrancyGuard {
 
 	// ---------------------------------------------------------------------------------------
 
-	event Executed(address indexed actor, bytes32 callId, uint256 failureMap);
+	event Executed(bytes32 callId, uint256 failureMap);
 
 	error TooManyActions();
 	error ActionFailed(uint256 index);
@@ -78,7 +78,7 @@ abstract contract ExecuteOwnable is Ownable2Step, ReentrancyGuard {
 			}
 		}
 
-		emit Executed(msg.sender, _callId, failureMap);
+		emit Executed(_callId, failureMap);
 	}
 
 	// ---------------------------------------------------------------------------------------

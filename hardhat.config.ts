@@ -14,12 +14,14 @@ dotenv.config();
 
 // ---------------------------------------------------------------------------------------
 
-const index = process.env.DEPLOYER_SEED_INDEX;
-const start = index && index?.length > 0 ? parseInt(index) : 0;
+const indexParsed = process.env.DEPLOYER_SEED_INDEX;
+const index = indexParsed && indexParsed?.length > 0 ? parseInt(indexParsed) : 0;
 
 const seed = process.env.DEPLOYER_SEED;
 if (!seed) throw new Error('Failed to import the seed string from .env');
-const wallet = getChildFromSeed(seed, start); // deployer
+const wallet = getChildFromSeed(seed, index); // deployer
+
+// log infos
 console.log('### Deployer Wallet ###');
 console.log(wallet.address, `index: `, wallet.index);
 
@@ -42,18 +44,28 @@ const config: HardhatUserConfig = {
 		},
 	},
 	networks: {
+		hardhat: {
+			forking: {
+				url: `https://eth-mainnet.g.alchemy.com/v2/${alchemy}`,
+				enabled: false,
+			},
+			gas: 'auto',
+			gasPrice: 'auto',
+			initialBaseFeePerGas: 100000000,
+			gasMultiplier: 2,
+		},
 		mainnet: {
 			url: `https://eth-mainnet.g.alchemy.com/v2/${alchemy}`,
 			chainId: 1,
 			gas: 'auto',
 			gasPrice: 'auto',
-			gasMultiplier: 0.6,
+			gasMultiplier: 0.5,
 			accounts: [wallet.privateKey],
 			timeout: 50_000,
 		},
-		tenderly: {
-			url: process.env.TENDERLY_RPC_URL,
-			chainId: 42069,
+		sepolia: {
+			url: `https://eth-sepolia.g.alchemy.com/v2/${alchemy}`,
+			chainId: 11155111,
 			gas: 'auto',
 			gasPrice: 'auto',
 			accounts: [wallet.privateKey],
@@ -67,9 +79,33 @@ const config: HardhatUserConfig = {
 			accounts: [wallet.privateKey],
 			timeout: 50_000,
 		},
-		citrea: {
-			url: `https://rpc.testnet.citrea.xyz`,
-			chainId: 5115,
+		optimism: {
+			url: `https://opt-mainnet.g.alchemy.com/v2/${alchemy}`,
+			chainId: 10,
+			gas: 'auto',
+			gasPrice: 'auto',
+			accounts: [wallet.privateKey],
+			timeout: 50_000,
+		},
+		arbitrum: {
+			url: `https://arb-mainnet.g.alchemy.com/v2/${alchemy}`,
+			chainId: 42161,
+			gas: 'auto',
+			gasPrice: 'auto',
+			accounts: [wallet.privateKey],
+			timeout: 50_000,
+		},
+		base: {
+			url: `https://base-mainnet.g.alchemy.com/v2/${alchemy}`,
+			chainId: 8453,
+			gas: 'auto',
+			gasPrice: 'auto',
+			accounts: [wallet.privateKey],
+			timeout: 50_000,
+		},
+		avalanche: {
+			url: `https://avax-mainnet.g.alchemy.com/v2/${alchemy}`,
+			chainId: 43114,
 			gas: 'auto',
 			gasPrice: 'auto',
 			accounts: [wallet.privateKey],
@@ -78,19 +114,16 @@ const config: HardhatUserConfig = {
 	},
 	etherscan: {
 		apiKey: etherscan,
-		// apiKey: {
-		// citrea: 'your API key',
-		// },
-		// customChains: [
-		// 	{
-		// 		network: 'citrea',
-		// 		chainId: 5115,
-		// 		urls: {
-		// 			apiURL: 'https://explorer.testnet.citrea.xyz/api',
-		// 			browserURL: 'https://explorer.testnet.citrea.xyz',
-		// 		},
-		// 	},
-		// ],
+		customChains: [
+			{
+				network: 'mainnet',
+				chainId: 1,
+				urls: {
+					apiURL: 'https://api.etherscan.io/v2/api',
+					browserURL: 'https://etherscan.io',
+				},
+			},
+		],
 	},
 	sourcify: {
 		enabled: true,
