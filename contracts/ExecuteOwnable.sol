@@ -26,7 +26,7 @@ abstract contract ExecuteOwnable is Ownable2Step, ReentrancyGuard {
 
 	// ---------------------------------------------------------------------------------------
 
-	event Executed(bytes32 callId, uint256 failureMap);
+	event Executed(Action[] actions, uint256 allowFailureMap, uint256 failureMap, bytes[] execResults);
 
 	error TooManyActions();
 	error ActionFailed(uint256 index);
@@ -46,11 +46,9 @@ abstract contract ExecuteOwnable is Ownable2Step, ReentrancyGuard {
 	/// @notice Execute arbitrary actions on behalf of this contract.
 	/// @dev Follows the Aragon IExecutor pattern. Useful for managing owned external contracts
 	///      (e.g. Frankencoin positions: adjust, mint, repay, withdrawCollateral, etc.).
-	/// @param _callId Arbitrary identifier for the call batch (e.g. nonce).
 	/// @param _actions Array of actions to execute.
 	/// @param _allowFailureMap Bitmap of action indices allowed to fail without reverting.
 	function execute(
-		bytes32 _callId,
 		Action[] calldata _actions,
 		uint256 _allowFailureMap
 	) external onlyOwner nonReentrant returns (bytes[] memory execResults, uint256 failureMap) {
@@ -78,7 +76,12 @@ abstract contract ExecuteOwnable is Ownable2Step, ReentrancyGuard {
 			}
 		}
 
-		emit Executed(_callId, failureMap);
+		emit Executed({
+			actions: _actions,
+			allowFailureMap: _allowFailureMap,
+			failureMap: failureMap,
+			execResults: execResults
+		});
 	}
 
 	// ---------------------------------------------------------------------------------------
