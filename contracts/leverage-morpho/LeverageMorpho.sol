@@ -8,9 +8,9 @@ import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 import {ISwapRouter} from '@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol';
 
-import {IMorpho, MarketParams, Id, Position, Market} from './morpho/IMorpho.sol';
-import {SharesMathLib} from './morpho/SharesMathLib.sol';
-import {IMorphoFlashLoanCallback} from './morpho/IMorphoCallbacks.sol';
+import {IMorpho, MarketParams, Id, Position, Market} from '../morpho/IMorpho.sol';
+import {SharesMathLib} from '../morpho/SharesMathLib.sol';
+import {IMorphoFlashLoanCallback} from '../morpho/IMorphoCallbacks.sol';
 
 contract LeverageMorpho is Ownable, IMorphoFlashLoanCallback {
 	using Math for uint256;

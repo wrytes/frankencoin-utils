@@ -4,9 +4,9 @@ pragma solidity ^0.8.20;
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 
-import {IPositionV2} from './frankencoin/IPositionV2.sol';
-import {IPositionRoller} from './frankencoin/IPositionRoller.sol';
-import {ExecuteOwnable} from './ExecuteOwnable.sol';
+import {IPositionV2} from '../frankencoin/IPositionV2.sol';
+import {IPositionRoller} from '../frankencoin/IPositionRoller.sol';
+import {ExecuteOwnable} from '../utils/ExecuteOwnable.sol';
 
 /// @title PositionV2Streamer
 /// @notice Owns Frankencoin V2 positions and allows bots to roll expiring positions into

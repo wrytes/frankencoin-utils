@@ -6,11 +6,11 @@ import {Ownable} from '@openzeppelin/contracts/access/Ownable.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 
-import {ISavingsToken} from './interfaces/ISavingsToken.sol';
+import {ISavingsToken} from './ISavingsToken.sol';
 
-import {IMorpho, MarketParams, Id, Position, Market} from './morpho/IMorpho.sol';
-import {IMorphoFlashLoanCallback} from './morpho/IMorphoCallbacks.sol';
-import {SharesMathLib} from './morpho/SharesMathLib.sol';
+import {IMorpho, MarketParams, Id, Position, Market} from '../morpho/IMorpho.sol';
+import {IMorphoFlashLoanCallback} from '../morpho/IMorphoCallbacks.sol';
+import {SharesMathLib} from '../morpho/SharesMathLib.sol';
 
 contract SavingsTokenMorpho is Ownable, IMorphoFlashLoanCallback {
 	using Math for uint256;

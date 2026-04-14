@@ -8,12 +8,12 @@ import {Ownable, Ownable2Step} from '@openzeppelin/contracts/access/Ownable2Step
 
 import {ISwapRouter} from '@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol';
 
-import {IMorpho} from './morpho/IMorpho.sol';
-import {IMorphoFlashLoanCallback} from './morpho/IMorphoCallbacks.sol';
+import {IMorpho} from '../morpho/IMorpho.sol';
+import {IMorphoFlashLoanCallback} from '../morpho/IMorphoCallbacks.sol';
 
-import {IFrankencoin} from './frankencoin/IFrankencoin.sol';
-import {IMintingHubV2Bidder} from './frankencoin/IMintingHubV2Bidder.sol';
-import {IPositionV2} from './frankencoin/IPositionV2.sol';
+import {IFrankencoin} from '../frankencoin/IFrankencoin.sol';
+import {IMintingHubV2Bidder} from '../frankencoin/IMintingHubV2Bidder.sol';
+import {IPositionV2} from '../frankencoin/IPositionV2.sol';
 
 /// @title BidderMorphoV2Ownable
 /// @notice Executes bids on MintingHub V2 using Morpho flash loans and Uniswap V3 swaps.

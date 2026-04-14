@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {LeverageMorpho} from './LeverageMorpho.sol';
-import {MarketParams, Id} from './morpho/IMorpho.sol';
+import {MarketParams, Id} from '../morpho/IMorpho.sol';
 
 contract LeverageMorphoFactory {
 	// mainnet deployment
