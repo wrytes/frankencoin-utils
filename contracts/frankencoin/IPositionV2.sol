@@ -30,6 +30,8 @@ interface IPositionV2 {
 
 	function adjust(uint256 newMinted, uint256 newCollateral, uint256 newPrice) external;
 
+	function adjustPrice(uint256 newPrice) external;
+
 	function minted() external view returns (uint256);
 
 	function availableForMinting() external view returns (uint256);
