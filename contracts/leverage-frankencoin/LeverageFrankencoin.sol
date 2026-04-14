@@ -19,18 +19,20 @@ import {IMintingHubV2} from '../frankencoin/IMintingHubV2.sol';
  * Flash loans      : Morpho                  — always in the collateral token
  * Swap aggregator  : 1inch                   — raw calldata from off-chain API
  *
+ * ── Lifecycle ────────────────────────────────────────────────────────────────
+ *  On deployment no live position exists. The first `increase` call clones a
+ *  new position from `parent` using the supplied `newExpiration`. Subsequent
+ *  `increase` calls adjust the existing position normally.
+ *
  * ── Price rules ──────────────────────────────────────────────────────────────
  *  LTV in Frankencoin = liqPrice / marketPrice  (NOT loan value / collateral value)
  *  Decreasing liqPrice : always allowed, immediate, no cooldown.
  *  Increasing liqPrice : triggers a 3-day cooldown; minting is guarded during
  *                        that window.  Pass newPrice = 0 to keep the current price.
  *
- * All operations that touch the position accept a `newPrice` parameter and use
- * position.adjust() atomically so collateral, debt and price are updated together.
- *
  * Operations
  * ----------
- * increase          – flash-loan collToken, add to position, mint loanToken, swap loan→coll
+ * increase          – clone (first call) or adjust existing position; swap loan→coll
  * decrease          – flash-loan collToken, swap coll→loan, repay + withdraw atomically
  * close             – close position, equity returned in loanToken
  * closeInCollateral – close position, equity returned in collToken (exact-output swap)
@@ -43,27 +45,32 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 
 	IMorpho private immutable morpho;
 	IMintingHubV2 public immutable hub;
+	IPositionV2 public immutable parent; // source position used for cloning
 	IERC20 public immutable loanToken; // minted / repaid against the Frankencoin position (ZCHF)
-	IERC20 public immutable collToken; // collateral token of the managed position
+	IERC20 public immutable collToken; // collateral token (derived from parent)
 	address public immutable oneInchRouter;
 
 	// ── Mutable state ─────────────────────────────────────────────────────────
 
-	IPositionV2 public position; // current active Frankencoin position (updated on roll)
+	/// @notice Currently active Frankencoin position. address(0) until first increase.
+	IPositionV2 public position;
 
 	// ── Opcodes ───────────────────────────────────────────────────────────────
 
-	uint8 private constant INCREASE_LEVERAGE   = 0;
-	uint8 private constant DECREASE_LEVERAGE   = 1;
-	uint8 private constant ROLL_POSITION       = 2;
-	uint8 private constant CLOSE_POSITION      = 3;
+	uint8 private constant INCREASE_LEVERAGE = 0;
+	uint8 private constant DECREASE_LEVERAGE = 1;
+	uint8 private constant ROLL_POSITION = 2;
+	uint8 private constant CLOSE_POSITION = 3;
 	uint8 private constant CLOSE_POSITION_COLL = 4;
 
 	// ── Events ────────────────────────────────────────────────────────────────
 
 	event CollateralIn(uint256 amount);
 	event CollateralOut(uint256 amount);
+	event LoanMinted(uint256 amount);
+	event LoanRepaid(uint256 amount);
 	event PriceAdjusted(uint256 oldPrice, uint256 newPrice);
+	event PositionOpened(address indexed position);
 	/// @param opcode  0=increase · 1=decrease · 2=roll · 3=close · 4=closeInCollateral
 	/// @param flash   collToken flash-loaned from Morpho
 	/// @param swapIn  token amount sold in the 1inch swap
@@ -74,6 +81,7 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 	// ── Errors ────────────────────────────────────────────────────────────────
 
 	error NotMorpho();
+	error NoPosition();
 	error InvalidOpcode(uint8 given);
 	error SwapFailed();
 	error InsufficientOutput(uint256 got, uint256 min);
@@ -82,52 +90,57 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 
 	/**
 	 * @param _morpho        Morpho core contract (flash loans).
-	 * @param _hub           Frankencoin MintingHubV2 (cloning on roll).
-	 * @param _position      Existing PositionV2 this contract manages.
+	 * @param _hub           Frankencoin MintingHubV2 (position cloning).
+	 * @param _parent        Source PositionV2 to clone from on first increase and on roll.
 	 * @param _oneInchRouter 1inch AggregationRouter.
 	 * @param _owner         Initial owner.
 	 */
 	constructor(
 		address _morpho,
 		address _hub,
-		address _position,
+		address _parent,
 		address _oneInchRouter,
 		address _owner
 	) Ownable(_owner) {
 		morpho = IMorpho(_morpho);
 		hub = IMintingHubV2(_hub);
-		position = IPositionV2(_position);
+		parent = IPositionV2(_parent);
 		loanToken = IERC20(address(IMintingHubV2(_hub).zchf()));
-		collToken = IERC20(address(IPositionV2(_position).collateral()));
+		collToken = IERC20(address(IPositionV2(_parent).collateral()));
 		oneInchRouter = _oneInchRouter;
+		// position starts as address(0); cloned on first increase
 	}
 
 	// ── Direct position management ────────────────────────────────────────────
 
-	/// @notice Pull collateral from caller and add it to the position.
+	/// @notice Pull collateral from caller and add it directly to the position.
 	function depositCollateral(uint256 amount) external onlyOwner {
-		collToken.safeTransferFrom(msg.sender, address(this), amount);
-		collToken.forceApprove(address(position), amount);
-		position.adjust(position.minted(), _posColl() + amount, position.price());
+		if (address(position) == address(0)) revert NoPosition();
+		collToken.safeTransferFrom(msg.sender, address(position), amount);
 		emit CollateralIn(amount);
 	}
 
 	/// @notice Withdraw collateral from the position to the caller.
 	function withdrawCollateral(uint256 amount) external onlyOwner {
+		if (address(position) == address(0)) revert NoPosition();
 		position.withdrawCollateral(msg.sender, amount);
 		emit CollateralOut(amount);
 	}
 
 	/// @notice Mint loanToken from the position to the caller.
 	function mint(uint256 amount) external onlyOwner {
+		if (address(position) == address(0)) revert NoPosition();
 		position.mint(msg.sender, amount);
+		emit LoanMinted(amount);
 	}
 
 	/// @notice Pull loanToken from caller and repay position debt.
 	function repay(uint256 amount) external onlyOwner {
+		if (address(position) == address(0)) revert NoPosition();
 		loanToken.safeTransferFrom(msg.sender, address(this), amount);
 		loanToken.forceApprove(address(position), amount);
 		position.repay(amount);
+		emit LoanRepaid(amount);
 	}
 
 	/**
@@ -136,6 +149,7 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 	 *         Increasing: triggers a 3-day cooldown; minting is guarded during that window.
 	 */
 	function adjustPrice(uint256 newPrice) external onlyOwner {
+		if (address(position) == address(0)) revert NoPosition();
 		uint256 oldPrice = position.price();
 		position.adjustPrice(newPrice);
 		emit PriceAdjusted(oldPrice, newPrice);
@@ -149,24 +163,29 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 	// ── Leverage operations ───────────────────────────────────────────────────
 
 	/**
-	 * @notice Increase leverage.
+	 * @notice Increase leverage. Clones a position from `parent` on the first call.
 	 *
-	 * Flow (inside flash-loan callback):
-	 *   1. adjust(minted + mintAmount, posColl + totalColl, newPrice)
-	 *      Adds all collToken (flash-loaned + walletColl) and mints loanToken atomically.
-	 *   2. All loanToken in contract (minted + walletLoan) swapped → collToken via 1inch.
-	 *   3. collToken returned to Morpho (minCollOut must be ≥ flashAmount).
+	 * First call (position == address(0)):
+	 *   hub.clone(parent, totalColl, mintAmount, newExpiration) opens the position.
+	 *
+	 * Subsequent calls:
+	 *   adjust(minted + mintAmount, posColl + totalColl, newPrice) adds collateral and mints atomically.
+	 *   newExpiration is ignored.
+	 *
+	 * Both paths continue with:
+	 *   Swap all loanToken in contract (minted + walletLoan) → collToken via 1inch.
+	 *   collToken returned to Morpho (minCollOut must be ≥ flashAmount).
 	 *
 	 * Note: if newPrice > current price a 3-day cooldown starts and minting will be guarded.
-	 *       The transaction will revert if the position blocks minting during cooldown.
 	 *
-	 * @param walletLoan  loanToken from caller's wallet (sold alongside minted loanToken).
-	 * @param walletColl  collToken from caller's wallet (equity contribution).
-	 * @param flashAmount collToken to flash-loan; determines the leverage multiplier.
-	 * @param mintAmount  Additional loanToken to mint from the position.
-	 * @param newPrice    New liquidation price. 0 = keep current.
-	 * @param minCollOut  Minimum collToken from the swap (must be ≥ flashAmount).
-	 * @param swapData    1inch calldata: loanToken → collToken, recipient = address(this).
+	 * @param walletLoan    loanToken from caller's wallet (sold alongside minted loanToken).
+	 * @param walletColl    collToken from caller's wallet (equity contribution).
+	 * @param flashAmount   collToken to flash-loan; determines the leverage multiplier.
+	 * @param mintAmount    loanToken to mint from the position.
+	 * @param newPrice      New liquidation price. 0 = keep current (ignored on first call).
+	 * @param newExpiration Expiration for the new clone. Only used on the first call.
+	 * @param minCollOut    Minimum collToken from the swap (must be ≥ flashAmount).
+	 * @param swapData      1inch calldata: loanToken → collToken, recipient = address(this).
 	 */
 	function increase(
 		uint256 walletLoan,
@@ -174,12 +193,16 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 		uint256 flashAmount,
 		uint256 mintAmount,
 		uint256 newPrice,
+		uint40 newExpiration,
 		uint256 minCollOut,
 		bytes calldata swapData
 	) external onlyOwner {
 		if (walletLoan > 0) loanToken.safeTransferFrom(msg.sender, address(this), walletLoan);
 		if (walletColl > 0) collToken.safeTransferFrom(msg.sender, address(this), walletColl);
-		bytes memory data = abi.encode(INCREASE_LEVERAGE, abi.encode(mintAmount, newPrice, minCollOut, swapData));
+		bytes memory data = abi.encode(
+			INCREASE_LEVERAGE,
+			abi.encode(mintAmount, newPrice, newExpiration, minCollOut, swapData)
+		);
 		morpho.flashLoan(address(collToken), flashAmount, data);
 	}
 
@@ -193,7 +216,6 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 	 *   3. collToken returned to Morpho.
 	 *
 	 * Net effect: position has `flashAmount` less collateral, reduced debt, and optional new price.
-	 * Decreasing price is always safe. Increasing price during decrease is unusual but allowed.
 	 *
 	 * @param walletLoan  loanToken from caller's wallet (repays more debt than the swap alone).
 	 * @param walletColl  collToken from caller's wallet (sold alongside flash-loaned collToken).
@@ -210,6 +232,7 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 		uint256 minLoanOut,
 		bytes calldata swapData
 	) external onlyOwner {
+		if (address(position) == address(0)) revert NoPosition();
 		if (walletLoan > 0) loanToken.safeTransferFrom(msg.sender, address(this), walletLoan);
 		if (walletColl > 0) collToken.safeTransferFrom(msg.sender, address(this), walletColl);
 		bytes memory data = abi.encode(DECREASE_LEVERAGE, abi.encode(newPrice, minLoanOut, swapData));
@@ -237,6 +260,7 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 		uint256 minLoanOut,
 		bytes calldata swapData
 	) external onlyOwner {
+		if (address(position) == address(0)) revert NoPosition();
 		if (walletLoan > 0) loanToken.safeTransferFrom(msg.sender, address(this), walletLoan);
 		if (walletColl > 0) collToken.safeTransferFrom(msg.sender, address(this), walletColl);
 		bytes memory data = abi.encode(CLOSE_POSITION, abi.encode(minLoanOut, swapData));
@@ -267,6 +291,7 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 		uint256 minLoanOut,
 		bytes calldata swapData
 	) external onlyOwner {
+		if (address(position) == address(0)) revert NoPosition();
 		if (walletLoan > 0) loanToken.safeTransferFrom(msg.sender, address(this), walletLoan);
 		if (walletColl > 0) collToken.safeTransferFrom(msg.sender, address(this), walletColl);
 		bytes memory data = abi.encode(CLOSE_POSITION_COLL, abi.encode(minLoanOut, swapData));
@@ -274,10 +299,10 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 	}
 
 	/**
-	 * @notice Roll the current position into a fresh clone of `parent` via flash loan.
+	 * @notice Roll the current position into a fresh clone via flash loan.
 	 *
 	 * Flow (inside flash-loan callback):
-	 *   1. hub.clone(parent, assets, initialMint, newExpiration) — funds new clone with
+	 *   1. hub.clone(rollParent, assets, initialMint, newExpiration) — funds new clone with
 	 *      flash-loaned collateral; receives initialMint loanToken.
 	 *   2. `position` updated to new clone.
 	 *   3. Old position debt repaid with available loanToken (minted + walletLoan).
@@ -285,21 +310,22 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 	 *   5. collToken returned to Morpho.
 	 *
 	 * Requirement: `initialMint + walletLoan` ≥ old position's minted debt.
-	 * Price: inherited from `parent`. Use adjustPrice() afterwards if needed.
+	 * Price: inherited from `rollParent`. Use adjustPrice() afterwards if needed.
 	 *
-	 * @param parent        Parent position to clone (sets mint cap, reserve, challenge period).
+	 * @param rollParent    Parent to clone (can differ from the stored `parent`).
 	 * @param initialMint   loanToken to mint in the new clone.
 	 * @param walletLoan    Extra loanToken from caller's wallet for repayment shortfall.
 	 * @param newExpiration Expiration timestamp for the new clone.
 	 */
 	function roll(
-		address parent,
+		address rollParent,
 		uint256 initialMint,
 		uint256 walletLoan,
 		uint40 newExpiration
 	) external onlyOwner {
+		if (address(position) == address(0)) revert NoPosition();
 		if (walletLoan > 0) loanToken.safeTransferFrom(msg.sender, address(this), walletLoan);
-		bytes memory data = abi.encode(ROLL_POSITION, abi.encode(parent, initialMint, newExpiration));
+		bytes memory data = abi.encode(ROLL_POSITION, abi.encode(rollParent, initialMint, newExpiration));
 		morpho.flashLoan(address(collToken), _posColl(), data);
 	}
 
@@ -312,16 +338,29 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 
 		// ── INCREASE ─────────────────────────────────────────────────────────
 		if (opcode == INCREASE_LEVERAGE) {
-			(uint256 mintAmount, uint256 newPrice, uint256 minCollOut, bytes memory swapData) = abi.decode(
-				payload,
-				(uint256, uint256, uint256, bytes)
-			);
+			(
+				uint256 mintAmount,
+				uint256 newPrice,
+				uint40 newExpiration,
+				uint256 minCollOut,
+				bytes memory swapData
+			) = abi.decode(payload, (uint256, uint256, uint40, uint256, bytes));
 
-			// Atomic: add all collToken (flash-loaned + walletColl) + mint + optional price change
 			uint256 totalColl = collToken.balanceOf(address(this));
-			collToken.forceApprove(address(position), totalColl);
-			_adjustPosition(position.minted() + mintAmount, _posColl() + totalColl, newPrice);
-			// adjust() mints `mintAmount` loanToken to address(this) and pulls `totalColl`
+
+			if (address(position) == address(0) || position.isClosed()) {
+				// ── First call: clone position from parent ────────────────────
+				collToken.forceApprove(address(hub), totalColl);
+				address newPos = hub.clone(address(parent), totalColl, mintAmount, newExpiration);
+				position = IPositionV2(newPos);
+				// hub.clone pulls totalColl and mints mintAmount loanToken to address(this)
+				emit PositionOpened(newPos);
+			} else {
+				// ── Subsequent calls: adjust existing position ────────────────
+				collToken.forceApprove(address(position), totalColl);
+				_adjustPosition(position.minted() + mintAmount, _posColl() + totalColl, newPrice);
+				// adjust() pulls totalColl and mints mintAmount loanToken to address(this)
+			}
 
 			// Swap all loanToken in contract (minted + walletLoan) → collToken
 			uint256 swapIn = loanToken.balanceOf(address(this));
@@ -330,7 +369,7 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 			collToken.forceApprove(address(morpho), assets);
 			emit Executed(INCREASE_LEVERAGE, assets, swapIn, swapOut);
 
-		// ── DECREASE ─────────────────────────────────────────────────────────
+			// ── DECREASE ─────────────────────────────────────────────────────────
 		} else if (opcode == DECREASE_LEVERAGE) {
 			(uint256 newPrice, uint256 minLoanOut, bytes memory swapData) = abi.decode(
 				payload,
@@ -353,60 +392,9 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 			collToken.forceApprove(address(morpho), assets);
 			emit Executed(DECREASE_LEVERAGE, assets, swapIn, swapOut);
 
-		// ── CLOSE (equity in loanToken) ───────────────────────────────────────
-		} else if (opcode == CLOSE_POSITION) {
-			(uint256 minLoanOut, bytes memory swapData) = abi.decode(payload, (uint256, bytes));
-
-			// Swap all collToken in contract (flash-loaned + walletColl) → loanToken
-			uint256 swapIn = collToken.balanceOf(address(this));
-			uint256 swapOut = _swap1inch(address(collToken), address(loanToken), swapIn, minLoanOut, swapData);
-
-			// Repay all debt + withdraw all position collateral atomically
-			uint256 debt = position.minted();
-			loanToken.forceApprove(address(position), debt);
-			_adjustPosition(0, 0, position.price()); // price kept; full close
-
-			// Return loanToken equity to owner
-			uint256 loanEquity = loanToken.balanceOf(address(this));
-			if (loanEquity > 0) loanToken.safeTransfer(owner(), loanEquity);
-
-			collToken.forceApprove(address(morpho), assets);
-			emit Executed(CLOSE_POSITION, assets, swapIn, swapOut);
-
-		// ── CLOSE IN COLLATERAL (equity in collToken) ─────────────────────────
-		} else if (opcode == CLOSE_POSITION_COLL) {
-			(uint256 minLoanOut, bytes memory swapData) = abi.decode(payload, (uint256, bytes));
-
-			// Exact-output swap: sell minimum collToken to cover debt − walletLoan.
-			// Approve full collToken balance so 1inch takes only what it needs.
-			uint256 collBefore = collToken.balanceOf(address(this));
-			uint256 loanBefore = loanToken.balanceOf(address(this));
-			collToken.forceApprove(oneInchRouter, collBefore);
-			(bool success, ) = oneInchRouter.call(swapData);
-			if (!success) revert SwapFailed();
-			uint256 swapIn  = collBefore - collToken.balanceOf(address(this));
-			uint256 swapOut = loanToken.balanceOf(address(this)) - loanBefore;
-			if (swapOut < minLoanOut) revert InsufficientOutput(swapOut, minLoanOut);
-
-			// Repay all debt + withdraw all position collateral atomically
-			uint256 debt = position.minted();
-			loanToken.forceApprove(address(position), debt);
-			_adjustPosition(0, 0, position.price()); // price kept; full close
-
-			// Repay flash loan first, then send remaining collToken equity to owner
-			collToken.forceApprove(address(morpho), assets);
-			uint256 collEquity = collToken.balanceOf(address(this)) - assets;
-			if (collEquity > 0) collToken.safeTransfer(owner(), collEquity);
-
-			// Return any unused walletLoan surplus to owner
-			uint256 loanSurplus = loanToken.balanceOf(address(this));
-			if (loanSurplus > 0) loanToken.safeTransfer(owner(), loanSurplus);
-
-			emit Executed(CLOSE_POSITION_COLL, assets, swapIn, swapOut);
-
-		// ── ROLL ──────────────────────────────────────────────────────────────
+			// ── ROLL ──────────────────────────────────────────────────────────────
 		} else if (opcode == ROLL_POSITION) {
-			(address parent, uint256 initialMint, uint40 newExpiration) = abi.decode(
+			(address rollParent, uint256 initialMint, uint40 newExpiration) = abi.decode(
 				payload,
 				(address, uint256, uint40)
 			);
@@ -414,9 +402,9 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 			IPositionV2 oldPos = position;
 			uint256 oldDebt = oldPos.minted();
 
-			// Clone parent with flash-loaned collateral; receives initialMint loanToken
+			// Clone rollParent with flash-loaned collateral; receives initialMint loanToken
 			collToken.forceApprove(address(hub), assets);
-			address newPos = hub.clone(parent, assets, initialMint, newExpiration);
+			address newPos = hub.clone(rollParent, assets, initialMint, newExpiration);
 			position = IPositionV2(newPos);
 
 			// Repay old position debt (minted loanToken + walletLoan)
@@ -433,6 +421,58 @@ contract LeverageFrankencoin is Ownable, IMorphoFlashLoanCallback {
 			emit Rolled(address(oldPos), newPos);
 			emit Executed(ROLL_POSITION, assets, initialMint, oldDebt);
 
+			// ── CLOSE (equity in loanToken) ───────────────────────────────────────
+		} else if (opcode == CLOSE_POSITION) {
+			(uint256 minLoanOut, bytes memory swapData) = abi.decode(payload, (uint256, bytes));
+
+			// Swap all collToken in contract (flash-loaned + walletColl) → loanToken
+			uint256 swapIn = collToken.balanceOf(address(this));
+			uint256 swapOut = _swap1inch(address(collToken), address(loanToken), swapIn, minLoanOut, swapData);
+
+			// Repay all debt + withdraw all position collateral atomically
+			uint256 debt = position.minted();
+			loanToken.forceApprove(address(position), debt);
+			_adjustPosition(0, 0, position.price()); // price kept; full close
+			position = IPositionV2(address(0));
+
+			// Return loanToken equity to owner
+			uint256 loanEquity = loanToken.balanceOf(address(this));
+			if (loanEquity > 0) loanToken.safeTransfer(owner(), loanEquity);
+
+			collToken.forceApprove(address(morpho), assets);
+			emit Executed(CLOSE_POSITION, assets, swapIn, swapOut);
+
+			// ── CLOSE IN COLLATERAL (equity in collToken) ─────────────────────────
+		} else if (opcode == CLOSE_POSITION_COLL) {
+			(uint256 minLoanOut, bytes memory swapData) = abi.decode(payload, (uint256, bytes));
+
+			// Exact-output swap: sell minimum collToken to cover debt − walletLoan.
+			// Approve full collToken balance so 1inch takes only what it needs.
+			uint256 collBefore = collToken.balanceOf(address(this));
+			uint256 loanBefore = loanToken.balanceOf(address(this));
+			collToken.forceApprove(oneInchRouter, collBefore);
+			(bool success, ) = oneInchRouter.call(swapData);
+			if (!success) revert SwapFailed();
+			uint256 swapIn = collBefore - collToken.balanceOf(address(this));
+			uint256 swapOut = loanToken.balanceOf(address(this)) - loanBefore;
+			if (swapOut < minLoanOut) revert InsufficientOutput(swapOut, minLoanOut);
+
+			// Repay all debt + withdraw all position collateral atomically
+			uint256 debt = position.minted();
+			loanToken.forceApprove(address(position), debt);
+			_adjustPosition(0, 0, position.price()); // price kept; full close
+			position = IPositionV2(address(0));
+
+			// Repay flash loan first, then send remaining collToken equity to owner
+			collToken.forceApprove(address(morpho), assets);
+			uint256 collEquity = collToken.balanceOf(address(this)) - assets;
+			if (collEquity > 0) collToken.safeTransfer(owner(), collEquity);
+
+			// Return any unused walletLoan surplus to owner
+			uint256 loanSurplus = loanToken.balanceOf(address(this));
+			if (loanSurplus > 0) loanToken.safeTransfer(owner(), loanSurplus);
+
+			emit Executed(CLOSE_POSITION_COLL, assets, swapIn, swapOut);
 		} else revert InvalidOpcode(opcode);
 	}
 
