@@ -13,9 +13,7 @@ interface IFrankencoinFlashloan {
     ///         `FlashloanFrankencoin` contract for at least `amount` ZCHF so the
     ///         repayment pull can succeed.
     ///
-    /// @param source   The PositionV2 that was cloned to fund this loan.
-    ///                 Can be used to inspect collateral token, price, expiration, etc.
-    /// @param amount   ZCHF delivered to this contract (equals the repayment required).
-    /// @param data     Arbitrary bytes forwarded from the original `flashloan()` call.
-    function onFrankencoinFlashloan(address source, uint256 amount, bytes calldata data) external;
+    /// @param amount ZCHF delivered to this contract (equals the repayment required).
+    /// @param data   Arbitrary bytes forwarded from the original `flashloan()` call.
+    function onFrankencoinFlashloan(uint256 amount, bytes calldata data) external;
 }

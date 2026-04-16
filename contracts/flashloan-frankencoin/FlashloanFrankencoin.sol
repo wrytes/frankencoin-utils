@@ -119,15 +119,14 @@ contract FlashloanFrankencoin is IMorphoFlashLoanCallback, ReentrancyGuard {
 	// ── Public entry point ────────────────────────────────────────────────────
 
 	/**
-	 * @notice Flash-loan `amount` ZCHF to `recipient`, backed by an ephemeral clone of `source`.
+	 * @notice Flash-loan `amount` ZCHF to `msg.sender`, backed by an ephemeral clone of `source`.
 	 *
-	 * @param source    PositionV2 used as the clone template.
-	 *                  Must have `availableForMinting() >= amount` and must not be expired.
-	 * @param amount    ZCHF to deliver to `recipient` (also the exact repayment required).
-	 * @param recipient Contract implementing IFrankencoinFlashloan that receives the ZCHF.
-	 * @param data      Arbitrary bytes forwarded verbatim to `recipient.onFrankencoinFlashloan`.
+	 * @param source PositionV2 used as the clone template.
+	 *               Must have `availableForMinting() >= amount` and must not be expired.
+	 * @param amount ZCHF to deliver to `msg.sender` (also the exact repayment required).
+	 * @param data   Arbitrary bytes forwarded verbatim to `msg.sender.onFrankencoinFlashloan`.
 	 */
-	function flashloan(address source, uint256 amount, address recipient, bytes calldata data) external nonReentrant {
+	function flashloan(address source, uint256 amount, bytes calldata data) external nonReentrant {
 		IPositionV2 src = IPositionV2(source);
 
 		uint256 liqPrice = src.price();
@@ -146,10 +145,10 @@ contract FlashloanFrankencoin is IMorphoFlashLoanCallback, ReentrancyGuard {
 		uint256 collNeeded = (amount * 1e18 * 1_000_000 + denom - 1) / denom;
 
 		address collateral = address(src.collateral());
-		bytes memory cbData = abi.encode(source, amount, recipient, data);
+		bytes memory cbData = abi.encode(source, amount, msg.sender, data);
 		morpho.flashLoan(address(collateral), collNeeded, cbData);
 
-		emit Flashloan(source, recipient, address(collateral), collNeeded, amount);
+		emit Flashloan(source, msg.sender, address(collateral), collNeeded, amount);
 	}
 
 	// ── Morpho flash-loan callback ────────────────────────────────────────────
@@ -171,17 +170,23 @@ contract FlashloanFrankencoin is IMorphoFlashLoanCallback, ReentrancyGuard {
 
 		// ── 1. Clone source with flash-loaned collateral ──────────────────────
 		//
-		//    expiration = block.timestamp: the clone is immediately expired.
+		//    expiration = block.timestamp + 1: the clone expires at the very next block,
+		//    satisfying PositionV2's requirement of expiration > block.timestamp.
 		//    This is safe because the position is fully closed within this same
-		//    transaction — no external actor can interact with it.
-		//    Note: if the PositionV2 implementation requires expiration > block.timestamp
-		//    use block.timestamp + 1 instead (single-block grace is sufficient).
+		//    transaction — no external actor can interact with it during its single-block
+		//    window (and it is already expired by the time the next block is mined).
+		//
+		//    initialMint: we pass getMintAmount(amount) so that after the reserve
+		//    contribution is deducted, address(this) receives exactly `amount` usable
+		//    ZCHF. Passing `amount` directly would only deliver amount*(1-reservePPM)
+		//    to this contract, making the transfer to the recipient revert.
 		collToken.forceApprove(address(hub), collAssets);
+		uint256 totalMint = src.getMintAmount(amount);
 		address cloneAddr = hub.clone(
 			source,
 			collAssets,
-			amount, // initialMint: hub mints `amount` ZCHF to address(this)
-			uint40(block.timestamp)
+			totalMint,
+			uint40(block.timestamp + 1)
 		);
 		IPositionV2 clone = IPositionV2(cloneAddr);
 
@@ -191,7 +196,7 @@ contract FlashloanFrankencoin is IMorphoFlashLoanCallback, ReentrancyGuard {
 		// ── 3. Callback ───────────────────────────────────────────────────────
 		//    The recipient performs its logic here and MUST approve this contract
 		//    for `amount` ZCHF before this call returns.
-		IFrankencoinFlashloan(recipient).onFrankencoinFlashloan(source, amount, data);
+		IFrankencoinFlashloan(recipient).onFrankencoinFlashloan(amount, data);
 
 		// ── 4. Collect repayment from recipient ───────────────────────────────
 		IERC20(address(zchf)).safeTransferFrom(recipient, address(this), amount);
