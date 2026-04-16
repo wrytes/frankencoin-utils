@@ -64,7 +64,7 @@ describe('FlashloanFrankencoin', function () {
 		flashloan = await ethers.deployContract('FlashloanFrankencoin', [MORPHO, MINTING_HUB_V2]);
 
 		// Deploy mock recipient (needs ZCHF address for approval logic)
-		recipient = await ethers.deployContract('MockFlashloanRecipient', [FRANKENCOIN]);
+		recipient = await ethers.deployContract('MockFlashloanRecipient', [FRANKENCOIN, await flashloan.getAddress()]);
 
 		const flashAddr = await flashloan.getAddress();
 		const recipientAddr = await recipient.getAddress();
@@ -171,7 +171,7 @@ describe('FlashloanFrankencoin', function () {
 	describe('flashloan() — happy path', function () {
 		it('reverts with ZeroPriceOrAmount on zero amount', async function () {
 			await expect(
-				recipient.trigger(await flashloan.getAddress(), SOURCE_POSITION, 0n, '0x')
+				recipient.trigger(SOURCE_POSITION, 0n, '0x')
 			).to.be.revertedWithCustomError(flashloan, 'ZeroPriceOrAmount');
 		});
 
@@ -186,30 +186,27 @@ describe('FlashloanFrankencoin', function () {
 				this.skip();
 			}
 
-			const flashAddr = await flashloan.getAddress();
+			const flashAddr     = await flashloan.getAddress();
 			const recipientAddr = await recipient.getAddress();
 
-			const tx = await recipient.trigger(flashAddr, SOURCE_POSITION, amount, '0xdeadbeef');
+			const tx = await recipient.trigger(SOURCE_POSITION, amount, '0xdeadbeef');
 			const receipt = await tx.wait();
 
-			// // FlashloanReceived emitted by mock inside the callback
-			// await expect(tx).to.emit(recipient, 'FlashloanReceived').withArgs(flashAddr, amount, '0xdeadbeef');
+			await expect(tx).to.emit(recipient, 'FlashloanReceived').withArgs(flashAddr, amount, '0xdeadbeef');
 
-			// // Flashloan emitted by FlashloanFrankencoin after Morpho callback completes
-			// await expect(tx)
-			// 	.to.emit(flashloan, 'Flashloan')
-			// 	.withArgs(
-			// 		SOURCE_POSITION,
-			// 		recipientAddr,
-			// 		await sourcePos.collateral(),
-			// 		await flashloan.requiredCollateral(SOURCE_POSITION, amount),
-			// 		amount
-			// 	);
+			await expect(tx)
+				.to.emit(flashloan, 'Flashloan')
+				.withArgs(
+					SOURCE_POSITION,
+					recipientAddr,
+					await sourcePos.collateral(),
+					await flashloan.requiredCollateral(SOURCE_POSITION, amount),
+					amount
+				);
 
-			// No residual ZCHF left in the flashloan contract
-			// expect(await zchf.balanceOf(flashAddr)).to.equal(0n);
+			expect(await zchf.balanceOf(flashAddr)).to.equal(0n);
 
-			// console.log('  gas used:', receipt!.gasUsed.toString());
+			console.log('  gas used:', receipt!.gasUsed.toString());
 		});
 	});
 
@@ -228,22 +225,22 @@ describe('FlashloanFrankencoin', function () {
 
 	// ── Multi-loan ─────────────────────────────────────────────────────────────
 
-	// describe('multiple sequential flash loans', function () {
-	// 	it('two sequential flash loans both succeed', async function () {
-	// 		const amount    = await minViableAmount(10n);
-	// 		const available = await sourcePos.availableForMinting();
+	describe('multiple sequential flash loans', function () {
+		it('two sequential flash loans both succeed', async function () {
+			const amount    = await minViableAmount(10n);
+			const available = await sourcePos.availableForMinting();
 
-	// 		if (available < amount * 2n) {
-	// 			this.skip();
-	// 		}
+			if (available < amount * 2n) {
+				this.skip();
+			}
 
-	// 		const flashAddr = await flashloan.getAddress();
+			const flashAddr = await flashloan.getAddress();
 
-	// 		const tx1 = await recipient.trigger(flashAddr, SOURCE_POSITION, amount, '0x01');
-	// 		const tx2 = await recipient.trigger(flashAddr, SOURCE_POSITION, amount, '0x02');
+			const tx1 = await recipient.trigger(SOURCE_POSITION, amount, '0x01');
+			const tx2 = await recipient.trigger(SOURCE_POSITION, amount, '0x02');
 
-	// 		await expect(tx1).to.emit(recipient, 'FlashloanReceived').withArgs(flashAddr, amount, '0x01');
-	// 		await expect(tx2).to.emit(recipient, 'FlashloanReceived').withArgs(flashAddr, amount, '0x02');
-	// 	});
-	// });
+			await expect(tx1).to.emit(recipient, 'FlashloanReceived').withArgs(flashAddr, amount, '0x01');
+			await expect(tx2).to.emit(recipient, 'FlashloanReceived').withArgs(flashAddr, amount, '0x02');
+		});
+	});
 });

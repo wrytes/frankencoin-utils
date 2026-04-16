@@ -8,21 +8,21 @@ import {IFlashloanFrankencoin} from './IFlashloanFrankencoin.sol';
 
 contract MockFlashloanRecipient is IFrankencoinFlashLoanCallback {
 	IERC20 public immutable zchf;
-	address public flashloan;
+	IFlashloanFrankencoin public immutable flashloan;
 
 	event FlashloanReceived(address indexed caller, uint256 amount, bytes data);
 
-	constructor(address _zchf) {
+	constructor(address _zchf, address _flashloan) {
 		zchf = IERC20(_zchf);
+		flashloan = IFlashloanFrankencoin(_flashloan);
 	}
 
-	function trigger(address _flashloan, address source, uint256 amount, bytes calldata data) external {
-		flashloan = _flashloan;
-		IFlashloanFrankencoin(_flashloan).flashloan(source, amount, data);
+	function trigger(address source, uint256 amount, bytes calldata data) external {
+		flashloan.flashloan(source, amount, data);
 	}
 
 	function onFrankencoinFlashloan(uint256 amount, bytes calldata data) external override {
-		require(msg.sender == flashloan, 'unauthorized');
+		require(msg.sender == address(flashloan), 'unauthorized');
 		emit FlashloanReceived(msg.sender, amount, data);
 		zchf.approve(msg.sender, amount);
 	}
