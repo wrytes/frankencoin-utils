@@ -36,12 +36,14 @@ contract FlashloanFrankencoin is IMorphoFlashLoanCallback, ReentrancyGuard {
 	error NotMorpho();
 	error ZeroPriceOrAmount();
 	error FullReserve();
+	error PositionExpired();
+	error InsufficientMintingCapacity();
 
 	event Flashloan(
 		address indexed source,
 		address indexed recipient,
-		address indexed collToken,
 		uint256 collAmount,
+		uint256 totalMint,
 		uint256 amount
 	);
 
@@ -61,7 +63,7 @@ contract FlashloanFrankencoin is IMorphoFlashLoanCallback, ReentrancyGuard {
 
 		morpho.flashLoan(collateral, collNeeded, abi.encode(source, totalMint, amount, msg.sender, data));
 
-		emit Flashloan(source, msg.sender, collateral, collNeeded, amount);
+		emit Flashloan(source, msg.sender, collNeeded, totalMint, amount);
 	}
 
 	// ── Morpho callback ───────────────────────────────────────────────────────
@@ -77,16 +79,16 @@ contract FlashloanFrankencoin is IMorphoFlashLoanCallback, ReentrancyGuard {
 		IPositionV2 src = IPositionV2(source);
 		IERC20 collToken = IERC20(address(src.collateral()));
 
-		// // 1. Clone — expiration block.timestamp+1 satisfies PositionV2's strict inequality
+		// 1. Clone — expiration block.timestamp+1 satisfies PositionV2's strict inequality
 		collToken.forceApprove(address(hub), collAssets);
 		IPositionV2 clone = IPositionV2(hub.clone(source, collAssets, totalMint, uint40(block.timestamp + 1)));
 
-		// // 2. Deliver ZCHF → callback → collect repayment
+		// 2. Deliver ZCHF → callback → collect repayment
 		IERC20(address(zchf)).safeTransfer(recipient, amount);
 		IFrankencoinFlashLoanCallback(recipient).onFrankencoinFlashloan(amount, data);
 		IERC20(address(zchf)).safeTransferFrom(recipient, address(this), amount);
 
-		// // 3. Close clone: burns minted ZCHF, returns collateral here
+		// 3. Close clone: burns minted ZCHF, returns collateral here
 		clone.adjust(0, 0, clone.price());
 
 		// 4. Return collateral to Morpho
@@ -106,11 +108,13 @@ contract FlashloanFrankencoin is IMorphoFlashLoanCallback, ReentrancyGuard {
 
 		if (price == 0 || amount == 0) revert ZeroPriceOrAmount();
 		if (reserveContribution >= 1_000_000) revert FullReserve();
+		if (IPositionV2(src.original()).expiration() <= block.timestamp) revert PositionExpired();
 
 		uint256 denom = price * (1_000_000 - uint256(reserveContribution));
 		uint256 coll = (amount * 1e18 * 1_000_000 + denom - 1) / denom;
 
 		collateral = coll < src.minimumCollateral() ? src.minimumCollateral() : coll;
-		totalMint = (amount * 1_000_000) / (1_000_000 - uint256(reserveContribution));
+		totalMint = (collateral * price + 1e18 - 1) / 1e18;
+		if (src.availableForMinting() < totalMint) revert InsufficientMintingCapacity();
 	}
 }
