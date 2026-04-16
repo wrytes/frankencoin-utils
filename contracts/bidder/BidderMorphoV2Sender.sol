@@ -7,12 +7,12 @@ import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 import {ISwapRouter} from '@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol';
 
-import {IMorpho} from './morpho/IMorpho.sol';
-import {IMorphoFlashLoanCallback} from './morpho/IMorphoCallbacks.sol';
+import {IMorpho} from '../morpho/IMorpho.sol';
+import {IMorphoFlashLoanCallback} from '../morpho/IMorphoCallbacks.sol';
 
-import {IFrankencoin} from './frankencoin/IFrankencoin.sol';
-import {IMintingHubV2Bidder} from './frankencoin/IMintingHubV2Bidder.sol';
-import {IPositionV2} from './frankencoin/IPositionV2.sol';
+import {IFrankencoin} from '../frankencoin/IFrankencoin.sol';
+import {IMintingHubV2Bidder} from '../frankencoin/IMintingHubV2Bidder.sol';
+import {IPositionV2} from '../frankencoin/IPositionV2.sol';
 
 contract BidderMorphoV2Sender is IMorphoFlashLoanCallback {
 	using Math for uint256;
