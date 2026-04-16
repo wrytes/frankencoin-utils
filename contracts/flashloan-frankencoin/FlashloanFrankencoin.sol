@@ -12,7 +12,7 @@ import {IPositionV2} from '../frankencoin/IPositionV2.sol';
 import {IFrankencoin} from '../frankencoin/IFrankencoin.sol';
 import {IMintingHubV2} from '../frankencoin/IMintingHubV2.sol';
 
-import {IFrankencoinFlashloan} from './IFrankencoinFlashloan.sol';
+import {IFrankencoinFlashLoanCallback} from './IFrankencoinFlashLoanCallback.sol';
 
 /**
  * @title FlashloanFrankencoin
@@ -191,7 +191,7 @@ contract FlashloanFrankencoin is IMorphoFlashLoanCallback, ReentrancyGuard {
 		// ── 3. Callback ───────────────────────────────────────────────────────
 		//    The recipient performs its logic here and MUST approve this contract
 		//    for `amount` ZCHF before this call returns.
-		IFrankencoinFlashloan(recipient).onFrankencoinFlashloan(amount, data);
+		IFrankencoinFlashLoanCallback(recipient).onFrankencoinFlashloan(amount, data);
 
 		// ── 4. Collect repayment from recipient ───────────────────────────────
 		IERC20(address(zchf)).safeTransferFrom(recipient, address(this), amount);

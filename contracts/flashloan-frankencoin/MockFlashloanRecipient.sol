@@ -3,13 +3,10 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
-import {IFrankencoinFlashloan} from './IFrankencoinFlashloan.sol';
+import {IFrankencoinFlashLoanCallback} from './IFrankencoinFlashLoanCallback.sol';
+import {IFlashloanFrankencoin} from './IFlashloanFrankencoin.sol';
 
-interface IFlashloanFrankencoin {
-	function flashloan(address source, uint256 amount, bytes calldata data) external;
-}
-
-contract MockFlashloanRecipient is IFrankencoinFlashloan {
+contract MockFlashloanRecipient is IFrankencoinFlashLoanCallback {
 	IERC20 public immutable zchf;
 	address public flashloan;
 
