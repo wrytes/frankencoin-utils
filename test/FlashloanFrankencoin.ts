@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { FlashloanFrankencoin, MockFlashloanRecipient } from '../typechain';
 import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
+import { parseEther } from 'ethers';
 
 // ── Mainnet addresses ──────────────────────────────────────────────────────────
 
@@ -95,18 +96,20 @@ describe('FlashloanFrankencoin', function () {
 
 	describe('requiredCollateral()', function () {
 		it('returns non-zero collateral for a valid source and amount', async function () {
-			const amount = ethers.parseEther('1000'); // 1 000 ZCHF
-			const coll = await flashloan.requiredCollateral(SOURCE_POSITION, amount);
+			const amount = ethers.parseEther('36000'); // 36 000 ZCHF
+			const [coll, totalMint] = await flashloan.requiredCollateral(SOURCE_POSITION, amount);
 
-			console.log('  requiredCollateral(1 000 ZCHF) =', ethers.formatUnits(coll, 8), 'WBTC');
-			expect(coll).to.be.gt(0n);
+			console.log('  requiredCollateral(36 000 ZCHF) =', ethers.formatUnits(coll, 8), 'WBTC');
+			console.log('  totalMint(45 000 ZCHF)          =', ethers.formatEther(totalMint), 'ZCHF'); // +20% reserve
+			expect(coll).to.be.equal(ethers.parseUnits('1', 8));
+			expect(totalMint).to.be.equal(ethers.parseEther('45000'));
 		});
 
 		it('scales linearly with amount', async function () {
-			const a1 = ethers.parseEther('1000');
-			const a2 = ethers.parseEther('2000');
-			const c1 = await flashloan.requiredCollateral(SOURCE_POSITION, a1);
-			const c2 = await flashloan.requiredCollateral(SOURCE_POSITION, a2);
+			const a1 = ethers.parseEther('100000');
+			const a2 = ethers.parseEther('200000');
+			const [c1] = await flashloan.requiredCollateral(SOURCE_POSITION, a1);
+			const [c2] = await flashloan.requiredCollateral(SOURCE_POSITION, a2);
 
 			// c2 should be exactly 2× c1 (ceiling math may differ by 1 wei)
 			expect(c2).to.be.closeTo(c1 * 2n, 1n);
@@ -170,13 +173,14 @@ describe('FlashloanFrankencoin', function () {
 
 	describe('flashloan() — happy path', function () {
 		it('reverts with ZeroPriceOrAmount on zero amount', async function () {
-			await expect(
-				recipient.trigger(SOURCE_POSITION, 0n, '0x')
-			).to.be.revertedWithCustomError(flashloan, 'ZeroPriceOrAmount');
+			await expect(recipient.trigger(SOURCE_POSITION, 0n, '0x')).to.be.revertedWithCustomError(
+				flashloan,
+				'ZeroPriceOrAmount'
+			);
 		});
 
 		it('executes a flash loan, recipient callback fires with correct data', async function () {
-			const amount = await minViableAmount(10n);
+			const amount = parseEther('36000');
 			const available = await sourcePos.availableForMinting();
 
 			console.log('  loan amount used:', ethers.formatEther(amount), 'ZCHF');
@@ -186,7 +190,7 @@ describe('FlashloanFrankencoin', function () {
 				this.skip();
 			}
 
-			const flashAddr     = await flashloan.getAddress();
+			const flashAddr = await flashloan.getAddress();
 			const recipientAddr = await recipient.getAddress();
 
 			const tx = await recipient.trigger(SOURCE_POSITION, amount, '0xdeadbeef');
@@ -194,15 +198,10 @@ describe('FlashloanFrankencoin', function () {
 
 			await expect(tx).to.emit(recipient, 'FlashloanReceived').withArgs(flashAddr, amount, '0xdeadbeef');
 
+			const [collNeeded] = await flashloan.requiredCollateral(SOURCE_POSITION, amount);
 			await expect(tx)
 				.to.emit(flashloan, 'Flashloan')
-				.withArgs(
-					SOURCE_POSITION,
-					recipientAddr,
-					await sourcePos.collateral(),
-					await flashloan.requiredCollateral(SOURCE_POSITION, amount),
-					amount
-				);
+				.withArgs(SOURCE_POSITION, recipientAddr, await sourcePos.collateral(), collNeeded, amount);
 
 			expect(await zchf.balanceOf(flashAddr)).to.equal(0n);
 
@@ -227,7 +226,7 @@ describe('FlashloanFrankencoin', function () {
 
 	describe('multiple sequential flash loans', function () {
 		it('two sequential flash loans both succeed', async function () {
-			const amount    = await minViableAmount(10n);
+			const amount = await minViableAmount(10n);
 			const available = await sourcePos.availableForMinting();
 
 			if (available < amount * 2n) {
