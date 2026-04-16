@@ -182,12 +182,7 @@ contract FlashloanFrankencoin is IMorphoFlashLoanCallback, ReentrancyGuard {
 		//    to this contract, making the transfer to the recipient revert.
 		collToken.forceApprove(address(hub), collAssets);
 		uint256 totalMint = src.getMintAmount(amount);
-		address cloneAddr = hub.clone(
-			source,
-			collAssets,
-			totalMint,
-			uint40(block.timestamp + 1)
-		);
+		address cloneAddr = hub.clone(source, collAssets, totalMint, uint40(block.timestamp + 1));
 		IPositionV2 clone = IPositionV2(cloneAddr);
 
 		// ── 2. Deliver ZCHF to recipient ──────────────────────────────────────
