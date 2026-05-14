@@ -273,7 +273,14 @@ describe('LeverageRealUnit', function () {
 					PAYMENT_HUB_ADDR
 				);
 
-			console.log('\n  staticCall leveragedPosition:', leveragedPositionAddr);
+			console.log('\n  executeLeverage args:');
+			console.log('    flashloanSource :', FLASHLOAN_SOURCE);
+			console.log('    cloneSource     :', CLONE_SOURCE);
+			console.log('    inputAmount     :', ethers.formatEther(INPUT_AMOUNT), 'ZCHF');
+			console.log('    expiration      :', new Date(Number(expiration) * 1000).toISOString());
+			console.log('    brokerbot       :', BROKERBOT_ADDR);
+			console.log('    paymentHub      :', PAYMENT_HUB_ADDR);
+			console.log('  staticCall result :', leveragedPositionAddr);
 		});
 
 		it('staticCall returns a non-zero position address', function () {
@@ -305,11 +312,15 @@ describe('LeverageRealUnit', function () {
 		});
 
 		it('no ZCHF left in LeverageRealUnit', async function () {
-			expect(await zchf.balanceOf(await leverageRealUnit.getAddress())).to.equal(0n);
+			const bal = await zchf.balanceOf(await leverageRealUnit.getAddress());
+			console.log('  ZCHF in contract     :', ethers.formatEther(bal), 'ZCHF');
+			expect(bal).to.equal(0n);
 		});
 
 		it('no REALU left in LeverageRealUnit', async function () {
-			expect(await realu.balanceOf(await leverageRealUnit.getAddress())).to.equal(0n);
+			const bal = await realu.balanceOf(await leverageRealUnit.getAddress());
+			console.log('  REALU in contract    :', bal.toString(), 'REALU');
+			expect(bal).to.equal(0n);
 		});
 
 		it('new position collateral is REALU', async function () {
@@ -322,21 +333,39 @@ describe('LeverageRealUnit', function () {
 			expect(await newPos.owner()).to.equal(user.address);
 		});
 
-		it('new position minted equals mintGross (flashloan + reserve + fee)', async function () {
-			const newPos = await ethers.getContractAt(posAbi, leveragedPositionAddr);
-			const minted = await newPos.minted();
-			const mintGross = preview.flashloanAmount + preview.reserveAmount + preview.feeAmount;
+		// ── preview() vs actual position ──────────────────────────────────────
 
-			console.log('  new position minted  :', ethers.formatEther(minted), 'ZCHF');
-			console.log('  expected mintGross   :', ethers.formatEther(mintGross), 'ZCHF');
+		describe('preview() vs actual position', function () {
+			let actualTokens: bigint;
+			let actualMinted: bigint;
+			let actualExpiration: bigint;
 
-			// Allow ±1 wei rounding from integer division in _compute
-			expect(minted).to.be.closeTo(mintGross, 1n);
-		});
+			before(async function () {
+				actualTokens = await realu.balanceOf(leveragedPositionAddr);
+				const newPos = await ethers.getContractAt(posAbi, leveragedPositionAddr);
+				actualMinted = await newPos.minted();
+				actualExpiration = await newPos.expiration();
 
-		it('new position expiration matches requested expiration', async function () {
-			const newPos = await ethers.getContractAt(posAbi, leveragedPositionAddr);
-			expect(await newPos.expiration()).to.equal(expiration);
+				const mintGross = preview.flashloanAmount + preview.reserveAmount + preview.feeAmount;
+
+				console.log('\n  === preview vs actual ===');
+				console.log('  tokens    preview:', preview.tokens.toString(), '| actual:', actualTokens.toString(), 'REALU');
+				console.log('  minted    preview:', ethers.formatEther(mintGross), '| actual:', ethers.formatEther(actualMinted), 'ZCHF');
+				console.log('  expires   preview:', new Date(Number(expiration) * 1000).toISOString(), '| actual:', new Date(Number(actualExpiration) * 1000).toISOString());
+			});
+
+			it('REALU collateral deposited equals preview.tokens', function () {
+				expect(actualTokens).to.equal(preview.tokens);
+			});
+
+			it('minted ZCHF matches preview mintGross (±1 wei rounding)', function () {
+				const mintGross = preview.flashloanAmount + preview.reserveAmount + preview.feeAmount;
+				expect(actualMinted).to.be.closeTo(mintGross, 1n);
+			});
+
+			it('expiration matches preview expiration', function () {
+				expect(actualExpiration).to.equal(expiration);
+			});
 		});
 	});
 });
