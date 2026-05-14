@@ -20,12 +20,16 @@ interface IOwnable {
  * @notice Stateless, permissionless executor that opens a leveraged Frankencoin
  *         PositionV2 backed by REALU (RealUnit, 0 decimals) in one transaction.
  *
- *         tokens-formula (all values derived on-chain from cloneSource + brokerbot):
- *           marketPrice = brokerbot.getBuyPrice(1)   ← ZCHF per 1 REALU
+ *         All values are derived on-chain from the clone source position and the
+ *         BrokerBot price. The user supplies only ZCHF equity, an expiration, and
+ *         the addresses of the source position and market contracts.
+ *
+ *         Core formula (all prices in ZCHF with 18 decimals):
+ *           netPPM      = 1_000_000 − resPPM − feePPM
  *           tokens      = floor( inputAmount / (marketPrice − liqPrice × netPPM / 1e6) )
  *           mintGross   = tokens × liqPrice
- *           mintNet     = getUsableMint(mintGross)   ← flashloan amount
- *           buyPrice    = brokerbot.getBuyPrice(tokens)   ← actual ZCHF to acquire tokens REALU
+ *           mintNet     = mintGross × netPPM / 1e6        ← flashloan amount
+ *           swapCost    = brokerbot.getBuyPrice(tokens)   ← ZCHF to acquire REALU
  *
  *         See docs/leverage-mechanism-02.md for the full derivation.
  */
@@ -74,8 +78,7 @@ contract LeverageRealUnit is IFrankencoinFlashLoanCallback {
 	 * @notice Preview all derived values for a prospective leverage opening.
 	 * @param cloneSource  PositionV2 to clone.
 	 * @param inputAmount  User's ZCHF equity contribution.
-	 * @param expiration   Intended clone expiration (used for validation only;
-	 *                     fee estimate uses source's current duration as proxy).
+	 * @param expiration   Clone expiration; used to compute feePPM = annualInterestPPM × duration / 365 days.
 	 * @param brokerbot    BrokerBot to query for market price and buy cost.
 	 */
 	function preview(
@@ -185,15 +188,15 @@ contract LeverageRealUnit is IFrankencoinFlashLoanCallback {
 	// ── Internal ──────────────────────────────────────────────────────────────
 
 	/**
-	 * @dev Derive tokens, mintGross, mintNet, and resPPM for a clone with a specific expiration.
+	 * @dev Derive tokens, mintGross, mintNet, resPPM, and feePPM for a clone.
 	 *
-	 *      liqPrice from source.price() carries 36 decimals for 0-decimal REALU.
+	 *      liqPrice: src.price() returns ZCHF per REALU with 36 decimals for 0-decimal
+	 *      collateral; dividing by 1e18 normalises to 18 decimals.
 	 *
-	 *      marketPrice is read live from brokerbot.getBuyPrice(1): cost of 1 REALU in ZCHF.
+	 *      feePPM: src.annualInterestPPM() prorated to the clone duration linearly.
+	 *      Truncates silently if duration × annualRate exceeds uint24 max (~1.68 × 10^7).
 	 *
-	 *      Fee scaling: annualInterestPPM is back-derived from the source position's
-	 *      getUsableMint (which uses the source's own remaining duration), then scaled
-	 *      linearly to the clone's duration: feePPM = annualPPM × duration / 365 days.
+	 *      netPPM: reverts with underflow if resPPM + feePPM ≥ 1_000_000.
 	 */
 	function _compute(
 		address cloneSource,
@@ -201,9 +204,9 @@ contract LeverageRealUnit is IFrankencoinFlashLoanCallback {
 		uint40 expiration,
 		IBrokerbot brokerbot
 	) internal view returns (uint256 tokens, uint256 mintGross, uint256 mintNet, uint24 resPPM, uint24 feePPM) {
-		require(expiration > block.timestamp, 'expiration too low');
-
 		IPositionV2 src = IPositionV2(cloneSource);
+		require(expiration > block.timestamp && expiration <= src.expiration(), 'invalid expiration');
+
 		uint256 liqPrice18 = src.price() / 1e18; // 36 dec (REALU: 0 decimals), normalise to 18 dec
 		resPPM = src.reserveContribution();
 		feePPM = uint24(((uint256(expiration) - block.timestamp) * uint256(src.annualInterestPPM())) / 365 days);
