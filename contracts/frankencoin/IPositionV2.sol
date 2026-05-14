@@ -40,6 +40,8 @@ interface IPositionV2 {
 
 	function reserveContribution() external view returns (uint24);
 
+	function annualInterestPPM() external view returns (uint24);
+
 	function withdrawCollateral(address target, uint256 amount) external;
 
 	function getUsableMint(uint256 totalMint, bool beforeFees) external view returns (uint256);
