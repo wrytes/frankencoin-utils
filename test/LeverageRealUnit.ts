@@ -8,8 +8,8 @@ describe('LeverageRealUnit', function () {
 
 	const ZCHF_ADDR = '0xB58E61C3098d85632Df34EecfB899A1Ed80921cB';
 	const REALU_ADDR = '0x553C7f9C780316FC1D34b8e14ac2465Ab22a090B';
-	const BROKERBOT_ADDR = '0xCFF32C60B87296B8c0c12980De685bEd6Cb9dD6d'; // REALU brokerbot
-	const PAYMENT_HUB_ADDR = '0xa537D23a76EC454F0874AD4508794b17eD9BE610'; // REALU payment hub
+	const BROKERBOT_ADDR = '0xCFF32C60B87296B8c0c12980De685bEd6Cb9dD6d';
+	const PAYMENT_HUB_ADDR = '0xa537D23a76EC454F0874AD4508794b17eD9BE610';
 	const FLASHLOAN_ADDR = '0x3D60dbD18B930B1710b76b88461E33DCAdEC96a1';
 	const HUB_ADDR = '0xDe12B620A8a714476A97EfD14E6F7180Ca653557';
 
@@ -41,7 +41,7 @@ describe('LeverageRealUnit', function () {
 
 	// ── Shared state ───────────────────────────────────────────────────────────
 
-	let expiration: bigint; // clone expiration sourced from CLONE_SOURCE
+	let expiration: bigint;
 
 	// ── ABIs ───────────────────────────────────────────────────────────────────
 
@@ -56,6 +56,7 @@ describe('LeverageRealUnit', function () {
 		'function collateral() view returns (address)',
 		'function price() view returns (uint256)',
 		'function expiration() view returns (uint40)',
+		'function annualInterestPPM() view returns (uint24)',
 		'function reserveContribution() view returns (uint24)',
 		'function minted() view returns (uint256)',
 		'function availableForMinting() view returns (uint256)',
@@ -94,8 +95,8 @@ describe('LeverageRealUnit', function () {
 		// Fund user with ZCHF
 		await zchf.connect(whale).transfer(user.address, INPUT_AMOUNT);
 
-		// Clone expiration = source expiration
-		expiration = 1798671600n; // await clonePos.expiration();
+		// Clone expiration sourced from the position itself
+		expiration = await clonePos.expiration();
 
 		// Deploy LeverageRealUnit (stateless — no constructor args)
 		leverageRealUnit = await ethers.deployContract('LeverageRealUnit');
@@ -113,6 +114,7 @@ describe('LeverageRealUnit', function () {
 		console.log('Market price (1) :', ethers.formatEther(await brokerbot.getBuyPrice(1n)), 'ZCHF/REALU');
 		console.log('Liq price (18dec):', ethers.formatEther((await clonePos.price()) / BigInt(1e18)), 'ZCHF/REALU');
 		console.log('Reserve PPM      :', (await clonePos.reserveContribution()).toString(), 'ppm');
+		console.log('Annual rate PPM  :', (await clonePos.annualInterestPPM()).toString(), 'ppm');
 		console.log('Available        :', ethers.formatEther(await clonePos.availableForMinting()), 'ZCHF');
 		console.log('Expiration       :', new Date(Number(expiration) * 1000).toISOString());
 	});
@@ -154,12 +156,14 @@ describe('LeverageRealUnit', function () {
 			const available = await clonePos.availableForMinting();
 			const minColl = await clonePos.minimumCollateral();
 			const resPPM = await clonePos.reserveContribution();
+			const annualPPM = await clonePos.annualInterestPPM();
 
 			console.log('  price (36dec)  :', price.toString());
 			console.log('  minted         :', ethers.formatEther(minted), 'ZCHF');
 			console.log('  available      :', ethers.formatEther(available), 'ZCHF');
 			console.log('  minimumColl    :', minColl.toString(), 'REALU');
 			console.log('  reservePPM     :', resPPM.toString());
+			console.log('  annualRatePPM  :', annualPPM.toString());
 
 			expect(price).to.be.gt(0n);
 			expect(available).to.be.gte(INPUT_AMOUNT, 'position has insufficient capacity for INPUT_AMOUNT');
@@ -167,6 +171,25 @@ describe('LeverageRealUnit', function () {
 
 		it('brokerbot token matches REALU', async function () {
 			expect(await brokerbot.token()).to.equal(REALU_ADDR);
+		});
+	});
+
+	// ── _compute() — input validation ─────────────────────────────────────────
+
+	describe('_compute() — input validation (via preview)', function () {
+		it('reverts with invalid expiration when expiration is in the past', async function () {
+			const block = await ethers.provider.getBlock('latest');
+			const pastExpiration = BigInt(block!.timestamp) - 1n;
+			await expect(
+				leverageRealUnit.preview(CLONE_SOURCE, INPUT_AMOUNT, pastExpiration, BROKERBOT_ADDR)
+			).to.be.revertedWith('invalid expiration');
+		});
+
+		it('reverts with invalid expiration when expiration exceeds cloneSource expiration', async function () {
+			const tooFar = expiration + 86400n; // 1 day beyond source expiration
+			await expect(
+				leverageRealUnit.preview(CLONE_SOURCE, INPUT_AMOUNT, tooFar, BROKERBOT_ADDR)
+			).to.be.revertedWith('invalid expiration');
 		});
 	});
 
@@ -194,8 +217,8 @@ describe('LeverageRealUnit', function () {
 			console.log('  Preview reserveAmt    :', ethers.formatEther(p.reserveAmount), 'ZCHF');
 		});
 
-		it('feeAmount is non-negative', function () {
-			expect(p.feeAmount).to.be.gte(0n);
+		it('feeAmount is non-zero (position has annualInterestPPM > 0)', function () {
+			expect(p.feeAmount).to.be.gt(0n);
 			console.log('  Preview feeAmt        :', ethers.formatEther(p.feeAmount), 'ZCHF');
 		});
 
@@ -205,14 +228,14 @@ describe('LeverageRealUnit', function () {
 			console.log('  Preview requiredAmt   :', ethers.formatEther(p.requiredAmount), 'ZCHF');
 		});
 
-		it('flashloanAmount < flashloanAmount + reserveAmount + feeAmount (mintNet < mintGross)', function () {
+		it('flashloanAmount + reserveAmount + feeAmount equals mintGross', function () {
 			const mintGross = p.flashloanAmount + p.reserveAmount + p.feeAmount;
 			expect(p.flashloanAmount).to.be.lt(mintGross);
 		});
 
-		it('requiredAmount (buy cost) > flashloanAmount (equity covers the gap)', function () {
-			// totalSpend ≈ requiredAmount; user covers what flashloan doesn't
-			expect(p.requiredAmount).to.be.gt(0n);
+		it('mintGross exceeds inputAmount (leverage effect)', function () {
+			const mintGross = p.flashloanAmount + p.reserveAmount + p.feeAmount;
+			expect(mintGross).to.be.gt(INPUT_AMOUNT);
 		});
 	});
 
@@ -274,7 +297,7 @@ describe('LeverageRealUnit', function () {
 			console.log('  executeLeverage gas  :', receipt!.gasUsed.toString());
 		});
 
-		it('user ZCHF balance decreased by inputAmount', async function () {
+		it('user ZCHF spend is at most inputAmount (surplus returned from rounding)', async function () {
 			const userZchfAfter = await zchf.balanceOf(user.address);
 			const actualSpend = userZchfBefore - userZchfAfter;
 			expect(actualSpend).to.be.lte(INPUT_AMOUNT);
@@ -307,7 +330,7 @@ describe('LeverageRealUnit', function () {
 			console.log('  new position minted  :', ethers.formatEther(minted), 'ZCHF');
 			console.log('  expected mintGross   :', ethers.formatEther(mintGross), 'ZCHF');
 
-			// Allow ±1 wei rounding from integer division
+			// Allow ±1 wei rounding from integer division in _compute
 			expect(minted).to.be.closeTo(mintGross, 1n);
 		});
 

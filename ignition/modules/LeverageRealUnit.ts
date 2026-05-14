@@ -15,7 +15,7 @@ console.log('Constructor Args');
 console.log(args);
 
 // fail safe
-// process.exit();
+process.exit();
 
 export default buildModule(MOD, (m) => {
 	return {
