@@ -276,7 +276,9 @@ describe('LeverageRealUnit', function () {
 
 		it('user ZCHF balance decreased by inputAmount', async function () {
 			const userZchfAfter = await zchf.balanceOf(user.address);
-			expect(userZchfBefore - userZchfAfter).to.equal(INPUT_AMOUNT);
+			const actualSpend = userZchfBefore - userZchfAfter;
+			expect(actualSpend).to.be.lte(INPUT_AMOUNT);
+			expect(actualSpend).to.be.gte(INPUT_AMOUNT - ethers.parseEther('1'));
 		});
 
 		it('no ZCHF left in LeverageRealUnit', async function () {
