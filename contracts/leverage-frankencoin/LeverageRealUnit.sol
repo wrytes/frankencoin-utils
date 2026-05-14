@@ -11,6 +11,10 @@ import {IMintingHubV2} from '../frankencoin/IMintingHubV2.sol';
 import {IBrokerbot} from '../brokerbot/IBrokerbot.sol';
 import {IPaymentHub} from '../brokerbot/IPaymentHub.sol';
 
+interface IOwnable {
+	function transferOwnership(address newOwner) external;
+}
+
 /**
  * @title  LeverageRealUnit
  * @notice Stateless, permissionless executor that opens a leveraged Frankencoin
@@ -80,7 +84,7 @@ contract LeverageRealUnit is IFrankencoinFlashLoanCallback {
 		uint40 expiration,
 		IBrokerbot brokerbot
 	) external view returns (Preview memory p) {
-		(uint256 tokens, uint256 mintGross, uint256 mintNet, uint24 resPPM) = _compute(
+		(uint256 tokens, uint256 mintGross, uint256 mintNet, uint24 resPPM, ) = _compute(
 			cloneSource,
 			inputAmount,
 			expiration,
@@ -120,7 +124,7 @@ contract LeverageRealUnit is IFrankencoinFlashLoanCallback {
 	) external returns (address leveragedPosition) {
 		ZCHF.safeTransferFrom(msg.sender, address(this), inputAmount);
 
-		(uint256 tokens, uint256 mintGross, uint256 mintNet, ) = _compute(
+		(uint256 tokens, uint256 mintGross, uint256 mintNet, , ) = _compute(
 			cloneSource,
 			inputAmount,
 			expiration,
@@ -161,11 +165,11 @@ contract LeverageRealUnit is IFrankencoinFlashLoanCallback {
 		uint256 gotREALU = d.paymentHub.payAndNotify(d.brokerbot, zchfCost, '');
 		if (gotREALU < d.tokens) revert InsufficientREALU(gotREALU, d.tokens);
 
-		// 2. Clone leveraged position, directly owned by recipient.
-		//    hub.clone pulls d.tokens REALU and mints d.mintGross → amount (mintNet) ZCHF here.
+		// 2. Clone leveraged position. Use the 4-arg overload so mintNet ZCHF flows to
+		//    this contract (msg.sender), not to d.recipient. With the 5-arg overload the
+		//    hub sends minted ZCHF to the explicit owner, leaving nothing here for repayment.
 		REALU.forceApprove(address(HUB), d.tokens);
-		address newPos = HUB.clone(d.recipient, d.cloneSource, d.tokens, d.mintGross, d.expiration);
-		_clonedPosition = newPos;
+		_clonedPosition = HUB.clone(d.cloneSource, d.tokens, d.mintGross, d.expiration);
 
 		// 3. Return any ZCHF surplus to recipient.
 		uint256 surplus = ZCHF.balanceOf(address(this));
@@ -173,6 +177,9 @@ contract LeverageRealUnit is IFrankencoinFlashLoanCallback {
 
 		// 4. Approve flashloan repayment (pull model).
 		ZCHF.forceApprove(address(FLASHLOAN), amount);
+
+		// 5. Transfer position ownership to recipient now that repayment is secured.
+		IOwnable(_clonedPosition).transferOwnership(d.recipient);
 	}
 
 	// ── Internal ──────────────────────────────────────────────────────────────
@@ -193,33 +200,22 @@ contract LeverageRealUnit is IFrankencoinFlashLoanCallback {
 		uint256 inputAmount,
 		uint40 expiration,
 		IBrokerbot brokerbot
-	) internal view returns (uint256 tokens, uint256 mintGross, uint256 mintNet, uint24 resPPM) {
+	) internal view returns (uint256 tokens, uint256 mintGross, uint256 mintNet, uint24 resPPM, uint24 feePPM) {
+		require(expiration > block.timestamp, 'expiration too low');
+
 		IPositionV2 src = IPositionV2(cloneSource);
-		uint256 liqPriceFull = src.price(); // 36 dec (REALU: 0 decimals)
-		uint256 liqPrice18 = liqPriceFull / 1e18; // normalise to 18 dec
+		uint256 liqPrice18 = src.price() / 1e18; // 36 dec (REALU: 0 decimals), normalise to 18 dec
 		resPPM = src.reserveContribution();
+		feePPM = uint24(((uint256(expiration) - block.timestamp) * uint256(src.annualInterestPPM())) / 365 days);
 
-		// Back-derive annualInterestPPM from the source position.
-		// getUsableMint uses the source's remaining duration, so we un-scale to annual.
-		uint256 refAmount = 1_000_000e18;
-		uint256 sourceNetPPM = (src.getUsableMint(refAmount, false) * 1_000_000) / refAmount;
-		uint256 sourceFeePPM = 1_000_000 - uint256(resPPM) - sourceNetPPM;
-		uint256 sourceDuration = src.expiration() > block.timestamp ? src.expiration() - block.timestamp : 0;
-		// annualInterestPPM = sourceFeePPM * 365 days / sourceDuration
-		// cloneFeePPM       = annualInterestPPM * cloneDuration / 365 days
-		//                   = sourceFeePPM * cloneDuration / sourceDuration   (365 days cancels)
-		uint256 cloneDuration = expiration > block.timestamp ? expiration - block.timestamp : 0;
-		uint256 cloneFeePPM = sourceDuration > 0 ? (sourceFeePPM * cloneDuration) / sourceDuration : 0;
+		uint24 netPPM = 1_000_000 - resPPM - feePPM;
 
-		uint256 netPPM = 1_000_000 - uint256(resPPM) - cloneFeePPM;
-
-		// tokens = inputAmount / (marketPrice − liqPrice × netPPM / 1e6)
 		uint256 marketPrice = brokerbot.getBuyPrice(1); // ZCHF per 1 REALU (18 dec)
 		uint256 creditPerToken = (liqPrice18 * netPPM) / 1_000_000;
 		tokens = inputAmount / (marketPrice - creditPerToken);
 
-		// mintGross = tokens × liqPrice (36 dec) / 1e18 = ZCHF (18 dec)
-		mintGross = (tokens * liqPriceFull) / 1e18;
+		// mintGross = tokens (0 dec) × liqPrice (18 dec) = ZCHF (18 dec)
+		mintGross = (tokens * liqPrice18);
 		mintNet = (mintGross * netPPM) / 1_000_000;
 	}
 }
