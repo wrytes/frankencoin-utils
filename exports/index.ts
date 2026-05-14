@@ -16,5 +16,7 @@ export * from './abis/LeverageMorpho';
 export * from './abis/LeverageMorphoFactory';
 export * from './abis/BidderMorphoV2Ownable';
 
+export * from './abis/LeverageRealUnit';
+
 // deployment params
 // export * as BackendWalletParams from '../ignition/params/BackendWallet';
