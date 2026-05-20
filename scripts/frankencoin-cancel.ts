@@ -1,12 +1,17 @@
 import { ethers } from 'ethers';
 import dotenv from 'dotenv';
-import { BUNDLE_UUID, BUILDERS } from './frankencoin-bid';
+import { BUNDLE_UUID, BLOCK_OFFSETS, BUILDERS, bundleUuid } from './frankencoin-bid';
 
 dotenv.config();
 
-// UUID to cancel — defaults to the one set in frankencoin-bid.ts.
-// Override via CLI: npx ts-node scripts/frankencoin-cancel.ts <uuid>
-const uuid = process.argv[2] ?? BUNDLE_UUID;
+// Cancels all block-offset UUIDs across all uuid-capable builders.
+// Override base UUID via CLI: npx ts-node scripts/frankencoin-cancel.ts <uuid>
+const baseUuid = process.argv[2] ?? BUNDLE_UUID;
+const uuids = BLOCK_OFFSETS.map(o => {
+	if (baseUuid !== BUNDLE_UUID) return baseUuid; // custom UUID passed — cancel just that one
+	return bundleUuid(o);
+});
+const uniqueUuids = [...new Set(uuids)];
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -17,23 +22,32 @@ async function flashbotsHeader(signer: ethers.Wallet, body: string): Promise<str
 
 async function cancelAt(
 	builder: typeof BUILDERS[number],
-	body: string,
+	uuid: string,
 	signer: ethers.Wallet
 ): Promise<void> {
+	const body = JSON.stringify({
+		jsonrpc: '2.0',
+		id: 1,
+		method: 'eth_cancelBundle',
+		params: [{ replacementUuid: uuid }],
+	});
+
 	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 	if (builder.auth) headers['X-Flashbots-Signature'] = await flashbotsHeader(signer, body);
+
+	const label = `${builder.name.padEnd(10)} [${uuid.replace(BUNDLE_UUID, '')}]`;
 
 	try {
 		const res = await fetch(builder.url, { method: 'POST', headers, body });
 		const result = (await res.json()) as { result?: unknown; error?: unknown };
 
 		if (result.error) {
-			console.log(`  ${builder.name.padEnd(10)} ✗  ${JSON.stringify(result.error)}`);
+			console.log(`  ${label} ✗  ${JSON.stringify(result.error)}`);
 		} else {
-			console.log(`  ${builder.name.padEnd(10)} ✓`);
+			console.log(`  ${label} ✓`);
 		}
 	} catch (err) {
-		console.log(`  ${builder.name.padEnd(10)} ✗  ${(err as Error).message}`);
+		console.log(`  ${label} ✗  ${(err as Error).message}`);
 	}
 }
 
@@ -42,19 +56,15 @@ async function main() {
 	if (!privateKey) throw new Error('PRIVATE_KEY not set in .env');
 
 	const signer = new ethers.Wallet(privateKey);
+	const cancellable = BUILDERS.filter(b => b.uuid);
 
-	const body = JSON.stringify({
-		jsonrpc: '2.0',
-		id: 1,
-		method: 'eth_cancelBundle',
-		params: [{ replacementUuid: uuid }],
-	});
+	console.log(`Cancelling ${uniqueUuids.length} bundle(s) across ${cancellable.length} builders...`);
+	console.log('UUIDs:', uniqueUuids.join(', '));
 
-	// Only cancel on builders that support replacementUuid
-	const cancellable = BUILDERS.filter((b) => b.uuid);
+	await Promise.all(
+		uniqueUuids.flatMap(uuid => cancellable.map(b => cancelAt(b, uuid, signer)))
+	);
 
-	console.log('Cancelling bundle:', uuid);
-	await Promise.all(cancellable.map((b) => cancelAt(b, body, signer)));
 	console.log('\nNote: not guaranteed if submitted within 4s of the block relay deadline.');
 }
 

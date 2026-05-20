@@ -31,9 +31,18 @@ const BLOCK_TIME = 12;
 // 1–2 gwei = normal, 5 gwei = strong, 10+ gwei = aggressive.
 const PRIORITY_FEE = ethers.parseUnits('5', 'gwei');
 
-// Stable UUID for this bundle — used to replace or cancel after submission.
-// Keep this fixed per auction. To cancel: yarn frankencoin:cancel <uuid>
+// Block window around the target block to submit bundles for.
+// Covers price drift: if the arb isn't valid at block N it may be at N+1..+6.
+// Each offset gets its own UUID so they're independently cancellable.
+export const BLOCK_OFFSETS = [-1, 0, 1, 2, 3, 4, 5, 6];
+
+// Base UUID — offset suffix appended per block: ...-1, -0, +1, +2 ... +6
 export const BUNDLE_UUID = 'frankencoin-bid-challenge-6';
+
+export function bundleUuid(offset: number): string {
+	const sign = offset > 0 ? '+' : '-';
+	return `${BUNDLE_UUID}${sign}${Math.abs(offset)}`;
+}
 
 // Builders to broadcast to in parallel. Flashbots requires a signed header;
 // the others accept unauthenticated requests.
@@ -41,12 +50,12 @@ export const BUNDLE_UUID = 'frankencoin-bid-challenge-6';
 // uuid: true  = supports cancel-endpoint (eth_cancelBundle by replacementUuid)
 // uuid: false = no cancel-endpoint support (submit-only)
 export const BUILDERS = [
-	{ name: 'Titan', url: 'https://rpc.titanbuilder.xyz', auth: false, uuid: true },
-	{ name: 'Flashbots', url: 'https://rpc.flashbots.net', auth: true, uuid: true },
-	{ name: 'Beaver', url: 'https://mevshare-rpc.beaverbuild.org', auth: false, uuid: true },
-	{ name: 'Eureka', url: 'https://rpc.eurekabuilder.xyz', auth: false, uuid: true },
-	{ name: 'Quasar', url: 'https://rpc.quasar.win', auth: false, uuid: true },
-	{ name: 'JetBuilder', url: 'https://rpc.mevshare.jetbldr.xyz', auth: false, uuid: true },
+	{ name: 'Titan',      url: 'https://rpc.titanbuilder.xyz',         auth: false, uuid: true },
+	{ name: 'Flashbots',  url: 'https://rpc.flashbots.net',            auth: true,  uuid: true },
+	{ name: 'Beaver',     url: 'https://mevshare-rpc.beaverbuild.org', auth: false, uuid: true },
+	{ name: 'Eureka',     url: 'https://rpc.eurekabuilder.xyz',        auth: false, uuid: true },
+	{ name: 'Quasar',     url: 'https://rpc.quasar.win',               auth: false, uuid: true },
+	{ name: 'JetBuilder', url: 'https://rpc.mevshare.jetbldr.xyz',     auth: false, uuid: true },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,28 +71,34 @@ async function flashbotsHeader(signer: ethers.Wallet, body: string): Promise<str
 async function submitToBuilder(
 	builder: (typeof BUILDERS)[number],
 	signedTx: string,
-	blockNumberHex: string,
+	blockNumber: number,
+	offset: number,
 	signer: ethers.Wallet
 ): Promise<void> {
+	const blockNumberHex = '0x' + blockNumber.toString(16);
+	const uuid = bundleUuid(offset);
+
 	const params: Record<string, unknown> = { txs: [signedTx], blockNumber: blockNumberHex };
-	if (builder.uuid) params.replacementUuid = BUNDLE_UUID;
+	if (builder.uuid) params.replacementUuid = uuid;
 
 	const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_sendBundle', params: [params] });
 
 	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 	if (builder.auth) headers['X-Flashbots-Signature'] = await flashbotsHeader(signer, body);
 
+	const label = `${builder.name.padEnd(10)} [${offset >= 0 ? '+' : ''}${offset}]`;
+
 	try {
 		const res = await fetch(builder.url, { method: 'POST', headers, body });
 		const result = (await res.json()) as { result?: unknown; error?: unknown };
 
 		if (result.error) {
-			console.log(`  ${builder.name.padEnd(10)} ✗  ${JSON.stringify(result.error)}`);
+			console.log(`  ${label} ✗  ${JSON.stringify(result.error)}`);
 		} else {
-			console.log(`  ${builder.name.padEnd(10)} ✓  ${JSON.stringify(result.result)}`);
+			console.log(`  ${label} ✓`);
 		}
 	} catch (err) {
-		console.log(`  ${builder.name.padEnd(10)} ✗  ${(err as Error).message}`);
+		console.log(`  ${label} ✗  ${(err as Error).message}`);
 	}
 }
 
@@ -107,7 +122,6 @@ async function main() {
 	const secondsUntilTarget = TARGET_TIMESTAMP - currentTimestamp;
 	const blocksUntilTarget = Math.ceil(secondsUntilTarget / BLOCK_TIME);
 	const targetBlock = currentBlock + blocksUntilTarget;
-	const blockNumberHex = '0x' + targetBlock.toString(16);
 
 	const [nonce, feeData, balance] = await Promise.all([
 		provider.getTransactionCount(signer.address),
@@ -130,12 +144,10 @@ async function main() {
 	};
 
 	const signedTx = await signer.signTransaction(tx);
-
 	const targetDate = new Date(TARGET_TIMESTAMP * 1000).toUTCString();
 
 	console.log('─── Frankencoin Private Bid ──────────────────────────────────');
 	console.log('Wallet:         ', signer.address, `(${ethers.formatEther(balance)} ETH)`);
-	console.log('Bundle UUID:    ', BUNDLE_UUID);
 	console.log('FlashBidder:    ', FLASH_BIDDER);
 	console.log('Challenge:      ', CHALLENGE_INDEX);
 	console.log('Amount:         ', ethers.formatEther(AMOUNT), 'WETH');
@@ -145,7 +157,8 @@ async function main() {
 	console.log('Target time:    ', targetDate);
 	console.log('Current block:  ', currentBlock, `(t=${currentTimestamp})`);
 	console.log('Δ seconds:      ', secondsUntilTarget, `(~${blocksUntilTarget} blocks)`);
-	console.log('Target block:   ', targetBlock, `(${blockNumberHex})`);
+	console.log('Target blocks:  ', BLOCK_OFFSETS.map(o => targetBlock + o).join(', '));
+	console.log('UUIDs:          ', BLOCK_OFFSETS.map(bundleUuid).join(', '));
 	console.log('─────────────────────────────────────────────────────────────');
 
 	if (secondsUntilTarget < 0) {
@@ -154,14 +167,16 @@ async function main() {
 	}
 
 	if (secondsUntilTarget > 120) {
-		console.warn(
-			`WARN: Target is ${secondsUntilTarget}s away. Run again ~1 block before the auction opens for the most accurate block number.`
-		);
+		console.warn(`WARN: Target is ${secondsUntilTarget}s away. Run again ~1 block before the auction opens for the most accurate block number.`);
 	}
 
 	console.log('\nBroadcasting to builders...');
-	await Promise.all(BUILDERS.map((b) => submitToBuilder(b, signedTx, blockNumberHex, signer)));
-	console.log(`\nLands in block ${targetBlock} or not at all. Rerun to retry.`);
+	await Promise.all(
+		BLOCK_OFFSETS.flatMap(offset =>
+			BUILDERS.map(b => submitToBuilder(b, signedTx, targetBlock + offset, offset, signer))
+		)
+	);
+	console.log(`\nWindow: blocks ${targetBlock - 1} → ${targetBlock + 6} (~${(BLOCK_OFFSETS.length * BLOCK_TIME)}s). Cancel with: yarn frankencoin:cancel`);
 }
 
 main().catch((err) => {
