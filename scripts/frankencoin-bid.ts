@@ -6,8 +6,6 @@ dotenv.config();
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 
-const TITAN_RPC = 'https://rpc.titanbuilder.xyz';
-
 // BidderMorphoV2Sender deployment
 const FLASH_BIDDER = '0x49b98e9d1a7dc863d3dbe457dc26ed713d7a9a31';
 
@@ -29,18 +27,57 @@ const TARGET_TIMESTAMP = 1779308465; // Wed May 20 2026 20:21:05 UTC
 // Ethereum average block time in seconds
 const BLOCK_TIME = 12;
 
-// Priority fee paid to Titan as the block builder.
-// 1–2 gwei = normal inclusion, 5 gwei = strong, 10+ gwei = aggressive.
-// For a time-critical auction block, 5–10 gwei is recommended.
+// Priority fee paid to block builders.
+// 1–2 gwei = normal, 5 gwei = strong, 10+ gwei = aggressive.
 const PRIORITY_FEE = ethers.parseUnits('5', 'gwei');
 
 // Stable UUID for this bundle — used to replace or cancel after submission.
 // Keep this fixed per auction. To cancel: yarn frankencoin:cancel <uuid>
 export const BUNDLE_UUID = 'frankencoin-bid-challenge-6';
 
+// Builders to broadcast to in parallel. Flashbots requires a signed header;
+// the others accept unauthenticated requests.
+export const BUILDERS = [
+	{ name: 'Titan', url: 'https://rpc.titanbuilder.xyz', auth: false },
+	{ name: 'Flashbots', url: 'https://relay.flashbots.net', auth: true },
+	{ name: 'Beaver', url: 'https://rpc.beaverbuild.org', auth: false },
+	{ name: 'rsync', url: 'https://rsync-builder.xyz', auth: false },
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 const IFACE = new ethers.Interface(BidderMorphoV2OwnableABI);
+
+// Flashbots requires: X-Flashbots-Signature: <address>:<sig of keccak256(body)>
+async function flashbotsHeader(signer: ethers.Wallet, body: string): Promise<string> {
+	const hash = ethers.id(body); // keccak256 of the UTF-8 body
+	const sig = await signer.signMessage(ethers.getBytes(hash));
+	return `${signer.address}:${sig}`;
+}
+
+async function submitToBuilder(
+	name: string,
+	url: string,
+	auth: boolean,
+	body: string,
+	signer: ethers.Wallet
+): Promise<void> {
+	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+	if (auth) headers['X-Flashbots-Signature'] = await flashbotsHeader(signer, body);
+
+	try {
+		const res = await fetch(url, { method: 'POST', headers, body });
+		const result = (await res.json()) as { result?: unknown; error?: unknown };
+
+		if (result.error) {
+			console.log(`  ${name.padEnd(10)} ✗  ${JSON.stringify(result.error)}`);
+		} else {
+			console.log(`  ${name.padEnd(10)} ✓  ${JSON.stringify(result.result)}`);
+		}
+	} catch (err) {
+		console.log(`  ${name.padEnd(10)} ✗  ${(err as Error).message}`);
+	}
+}
 
 async function main() {
 	const privateKey = process.env.PRIVATE_KEY;
@@ -114,7 +151,7 @@ async function main() {
 		);
 	}
 
-	const payload = {
+	const body = JSON.stringify({
 		jsonrpc: '2.0',
 		id: 1,
 		method: 'eth_sendBundle',
@@ -125,26 +162,11 @@ async function main() {
 				replacementUuid: BUNDLE_UUID,
 			},
 		],
-	};
-
-	console.log('\nSubmitting to Titan...');
-	return;
-
-	const res = await fetch(TITAN_RPC, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(payload),
 	});
 
-	const result = (await res.json()) as { result?: { bundleHash: string }; error?: unknown };
-
-	if (result.error) {
-		console.error('Submission failed:', result.error);
-		process.exit(1);
-	}
-
-	console.log('Bundle accepted — hash:', result.result?.bundleHash);
-	console.log(`Lands in block ${targetBlock} or not at all. Rerun to retry a different block.`);
+	console.log('\nBroadcasting to builders...');
+	await Promise.all(BUILDERS.map((b) => submitToBuilder(b.name, b.url, b.auth, body, signer)));
+	console.log(`\nLands in block ${targetBlock} or not at all. Rerun to retry.`);
 }
 
 main().catch((err) => {
