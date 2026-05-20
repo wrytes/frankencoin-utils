@@ -26,7 +26,7 @@ const PATH =
 // delta step: 4699003403458429240894855/1e18/86400= 54.386613466 ZCHF/sec
 // link to market price: 1680/54.386613466= 30.89sec before expiration
 // target: 1779308495-1680/54.386613466= Math.ceil -> 1779308465
-const TARGET_TIMESTAMP = 1779308464; // Wed May 20 2026 20:21:05 UTC
+const TARGET_TIMESTAMP = 1779308465; // Wed May 20 2026 20:21:05 UTC
 
 // Ethereum average block time in seconds
 const BLOCK_TIME = 12;
@@ -55,11 +55,11 @@ export function bundleUuid(offset: number): string {
 // uuid: false = no cancel-endpoint support (submit-only)
 export const BUILDERS = [
 	{ name: 'Titan', url: 'https://rpc.titanbuilder.xyz', auth: false, uuid: true },
-	{ name: 'Flashbots', url: 'https://rpc.flashbots.net', auth: true, uuid: true },
-	{ name: 'Beaver', url: 'https://mevshare-rpc.beaverbuild.org', auth: false, uuid: true },
-	{ name: 'Eureka', url: 'https://rpc.eurekabuilder.xyz', auth: false, uuid: true },
-	{ name: 'Quasar', url: 'https://rpc.quasar.win', auth: false, uuid: true },
-	{ name: 'JetBuilder', url: 'https://rpc.mevshare.jetbldr.xyz', auth: false, uuid: true },
+	{ name: 'Flashbots', url: 'https://rpc.flashbots.net', auth: true, uuid: false },
+	{ name: 'Beaver', url: 'https://mevshare-rpc.beaverbuild.org', auth: false, uuid: false },
+	{ name: 'Eureka', url: 'https://rpc.eurekabuilder.xyz', auth: false, uuid: false },
+	{ name: 'Quasar', url: 'https://rpc.quasar.win', auth: false, uuid: false },
+	{ name: 'JetBuilder', url: 'https://rpc.mevshare.jetbldr.xyz', auth: false, uuid: false },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -163,15 +163,17 @@ async function main() {
 	const currentDate = new Date(currentTimestamp * 1000).toUTCString();
 	const estBlockDate = new Date((currentTimestamp + blocksUntilTarget * BLOCK_TIME) * 1000).toUTCString();
 
+	const estBlockTimestamp = currentTimestamp + blocksUntilTarget * BLOCK_TIME;
+
 	console.log('─────────────────────────────────────────────────────────────');
 	console.log('Current Block:   ', currentBlock);
-	console.log('Current Time:    ', currentDate);
+	console.log('Current Time:    ', currentDate, `(${currentTimestamp})`);
 	console.log('');
-	console.log('Target Time:     ', targetDate);
+	console.log('Target Time:     ', targetDate, `(${TARGET_TIMESTAMP})`);
 	console.log('Delta:           ', `${secondsUntilTarget}s`);
 	console.log('');
 	console.log('Est. Block:      ', targetBlock);
-	console.log('Est. Block time: ', estBlockDate);
+	console.log('Est. Block time: ', estBlockDate, `(${estBlockTimestamp})`);
 	console.log('');
 	console.log('Target Blocks:');
 	BLOCK_OFFSETS.forEach((o) => console.log(`    [${o >= 0 ? '+' : ''}${o}]  ${targetBlock + o}  (${bundleUuid(o)})`));
