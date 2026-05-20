@@ -38,7 +38,7 @@ const PRIORITY_FEE = ethers.parseUnits('5', 'gwei');
 // Block window around the target block to submit bundles for.
 // Covers price drift: if the arb isn't valid at block N it may be at N+1..+6.
 // Each offset gets its own UUID so they're independently cancellable.
-export const BLOCK_OFFSETS = [-3, -2, -1, 0, 1, 2, 3, 4, 5];
+export const BLOCK_OFFSETS = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
 
 // Base UUID — offset suffix appended per block: ...-1, -0, +1, +2 ... +6
 export const BUNDLE_UUID = 'frankencoin-bid-challenge-6';
