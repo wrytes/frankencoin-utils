@@ -26,7 +26,7 @@ const PATH =
 // delta step: 4699003403458429240894855/1e18/86400= 54.386613466 ZCHF/sec
 // link to market price: 1680/54.386613466= 30.89sec before expiration
 // target: 1779308495-1680/54.386613466= Math.ceil -> 1779308465
-const TARGET_TIMESTAMP = 1779308465; // Wed May 20 2026 20:21:05 UTC
+const TARGET_TIMESTAMP = 1779308464; // Wed May 20 2026 20:21:05 UTC
 
 // Ethereum average block time in seconds
 const BLOCK_TIME = 12;
@@ -38,7 +38,7 @@ const PRIORITY_FEE = ethers.parseUnits('5', 'gwei');
 // Block window around the target block to submit bundles for.
 // Covers price drift: if the arb isn't valid at block N it may be at N+1..+6.
 // Each offset gets its own UUID so they're independently cancellable.
-export const BLOCK_OFFSETS = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
+export const BLOCK_OFFSETS = [-3, -2, -1, 0, 1, 2, 3];
 
 // Base UUID — offset suffix appended per block: ...-1, -0, +1, +2 ... +6
 export const BUNDLE_UUID = 'frankencoin-bid-challenge-6';
@@ -160,11 +160,20 @@ async function main() {
 	console.log('Priority fee:   ', ethers.formatUnits(PRIORITY_FEE, 'gwei'), 'gwei');
 	console.log('Base fee:       ', ethers.formatUnits(feeData.maxFeePerGas ?? 0n, 'gwei'), 'gwei');
 	console.log('Max fee:        ', ethers.formatUnits((feeData.maxFeePerGas ?? 0n) + PRIORITY_FEE, 'gwei'), 'gwei');
+	const currentDate = new Date(currentTimestamp * 1000).toUTCString();
+	const estBlockDate = new Date((currentTimestamp + blocksUntilTarget * BLOCK_TIME) * 1000).toUTCString();
+
 	console.log('─────────────────────────────────────────────────────────────');
-	console.log('Target time:    ', targetDate);
-	console.log('Current block:  ', currentBlock, `(t=${currentTimestamp})`);
-	console.log('Δ seconds:      ', secondsUntilTarget, `(~${blocksUntilTarget} blocks)`);
-	console.log('Target blocks:');
+	console.log('Current Block:   ', currentBlock);
+	console.log('Current Time:    ', currentDate);
+	console.log('');
+	console.log('Target Time:     ', targetDate);
+	console.log('Delta:           ', `${secondsUntilTarget}s`);
+	console.log('');
+	console.log('Est. Block:      ', targetBlock);
+	console.log('Est. Block time: ', estBlockDate);
+	console.log('');
+	console.log('Target Blocks:');
 	BLOCK_OFFSETS.forEach((o) => console.log(`    [${o >= 0 ? '+' : ''}${o}]  ${targetBlock + o}  (${bundleUuid(o)})`));
 	console.log('─────────────────────────────────────────────────────────────');
 
