@@ -11,26 +11,29 @@ const uuid = process.argv[2] ?? BUNDLE_UUID;
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function flashbotsHeader(signer: ethers.Wallet, body: string): Promise<string> {
-	const hash = ethers.id(body);
-	const sig = await signer.signMessage(ethers.getBytes(hash));
+	const sig = await signer.signMessage(ethers.id(body));
 	return `${signer.address}:${sig}`;
 }
 
-async function cancelAt(name: string, url: string, auth: boolean, body: string, signer: ethers.Wallet): Promise<void> {
+async function cancelAt(
+	builder: typeof BUILDERS[number],
+	body: string,
+	signer: ethers.Wallet
+): Promise<void> {
 	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-	if (auth) headers['X-Flashbots-Signature'] = await flashbotsHeader(signer, body);
+	if (builder.auth) headers['X-Flashbots-Signature'] = await flashbotsHeader(signer, body);
 
 	try {
-		const res = await fetch(url, { method: 'POST', headers, body });
+		const res = await fetch(builder.url, { method: 'POST', headers, body });
 		const result = (await res.json()) as { result?: unknown; error?: unknown };
 
 		if (result.error) {
-			console.log(`  ${name.padEnd(10)} ✗  ${JSON.stringify(result.error)}`);
+			console.log(`  ${builder.name.padEnd(10)} ✗  ${JSON.stringify(result.error)}`);
 		} else {
-			console.log(`  ${name.padEnd(10)} ✓`);
+			console.log(`  ${builder.name.padEnd(10)} ✓`);
 		}
 	} catch (err) {
-		console.log(`  ${name.padEnd(10)} ✗  ${(err as Error).message}`);
+		console.log(`  ${builder.name.padEnd(10)} ✗  ${(err as Error).message}`);
 	}
 }
 
@@ -47,8 +50,11 @@ async function main() {
 		params: [{ replacementUuid: uuid }],
 	});
 
+	// Only cancel on builders that support replacementUuid
+	const cancellable = BUILDERS.filter((b) => b.uuid);
+
 	console.log('Cancelling bundle:', uuid);
-	await Promise.all(BUILDERS.map((b) => cancelAt(b.name, b.url, b.auth, body, signer)));
+	await Promise.all(cancellable.map((b) => cancelAt(b, body, signer)));
 	console.log('\nNote: not guaranteed if submitted within 4s of the block relay deadline.');
 }
 

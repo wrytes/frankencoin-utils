@@ -37,45 +37,53 @@ export const BUNDLE_UUID = 'frankencoin-bid-challenge-6';
 
 // Builders to broadcast to in parallel. Flashbots requires a signed header;
 // the others accept unauthenticated requests.
+// Source: https://github.com/flashbots/dowg/blob/main/builder-registrations.json
+// uuid: true  = supports cancel-endpoint (eth_cancelBundle by replacementUuid)
+// uuid: false = no cancel-endpoint support (submit-only)
 export const BUILDERS = [
-	{ name: 'Titan', url: 'https://rpc.titanbuilder.xyz', auth: false },
-	{ name: 'Flashbots', url: 'https://relay.flashbots.net', auth: true },
-	{ name: 'Beaver', url: 'https://rpc.beaverbuild.org', auth: false },
-	{ name: 'rsync', url: 'https://rsync-builder.xyz', auth: false },
+	{ name: 'Titan', url: 'https://rpc.titanbuilder.xyz', auth: false, uuid: true },
+	{ name: 'Flashbots', url: 'https://rpc.flashbots.net', auth: true, uuid: true },
+	{ name: 'Beaver', url: 'https://mevshare-rpc.beaverbuild.org', auth: false, uuid: true },
+	{ name: 'Eureka', url: 'https://rpc.eurekabuilder.xyz', auth: false, uuid: true },
+	{ name: 'Quasar', url: 'https://rpc.quasar.win', auth: false, uuid: true },
+	{ name: 'JetBuilder', url: 'https://rpc.mevshare.jetbldr.xyz', auth: false, uuid: true },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 const IFACE = new ethers.Interface(BidderMorphoV2OwnableABI);
 
-// Flashbots requires: X-Flashbots-Signature: <address>:<sig of keccak256(body)>
+// Flashbots signs the keccak256 hex string as text (not raw bytes)
 async function flashbotsHeader(signer: ethers.Wallet, body: string): Promise<string> {
-	const hash = ethers.id(body); // keccak256 of the UTF-8 body
-	const sig = await signer.signMessage(ethers.getBytes(hash));
+	const sig = await signer.signMessage(ethers.id(body));
 	return `${signer.address}:${sig}`;
 }
 
 async function submitToBuilder(
-	name: string,
-	url: string,
-	auth: boolean,
-	body: string,
+	builder: (typeof BUILDERS)[number],
+	signedTx: string,
+	blockNumberHex: string,
 	signer: ethers.Wallet
 ): Promise<void> {
+	const params: Record<string, unknown> = { txs: [signedTx], blockNumber: blockNumberHex };
+	if (builder.uuid) params.replacementUuid = BUNDLE_UUID;
+
+	const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_sendBundle', params: [params] });
+
 	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-	if (auth) headers['X-Flashbots-Signature'] = await flashbotsHeader(signer, body);
+	if (builder.auth) headers['X-Flashbots-Signature'] = await flashbotsHeader(signer, body);
 
 	try {
-		const res = await fetch(url, { method: 'POST', headers, body });
+		const res = await fetch(builder.url, { method: 'POST', headers, body });
 		const result = (await res.json()) as { result?: unknown; error?: unknown };
 
 		if (result.error) {
-			console.log(`  ${name.padEnd(10)} ✗  ${JSON.stringify(result.error)}`);
+			console.log(`  ${builder.name.padEnd(10)} ✗  ${JSON.stringify(result.error)}`);
 		} else {
-			console.log(`  ${name.padEnd(10)} ✓  ${JSON.stringify(result.result)}`);
+			console.log(`  ${builder.name.padEnd(10)} ✓  ${JSON.stringify(result.result)}`);
 		}
 	} catch (err) {
-		console.log(`  ${name.padEnd(10)} ✗  ${(err as Error).message}`);
+		console.log(`  ${builder.name.padEnd(10)} ✗  ${(err as Error).message}`);
 	}
 }
 
@@ -151,21 +159,8 @@ async function main() {
 		);
 	}
 
-	const body = JSON.stringify({
-		jsonrpc: '2.0',
-		id: 1,
-		method: 'eth_sendBundle',
-		params: [
-			{
-				txs: [signedTx],
-				blockNumber: blockNumberHex,
-				replacementUuid: BUNDLE_UUID,
-			},
-		],
-	});
-
 	console.log('\nBroadcasting to builders...');
-	await Promise.all(BUILDERS.map((b) => submitToBuilder(b.name, b.url, b.auth, body, signer)));
+	await Promise.all(BUILDERS.map((b) => submitToBuilder(b, signedTx, blockNumberHex, signer)));
 	console.log(`\nLands in block ${targetBlock} or not at all. Rerun to retry.`);
 }
 
