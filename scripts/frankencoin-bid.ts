@@ -158,6 +158,8 @@ async function main() {
 	console.log('Amount:         ', ethers.formatEther(AMOUNT), 'WETH');
 	console.log('Path:            WETH → USDT → ZCHF (0.01% / 0.01%)');
 	console.log('Priority fee:   ', ethers.formatUnits(PRIORITY_FEE, 'gwei'), 'gwei');
+	console.log('Base fee:       ', ethers.formatUnits(feeData.maxFeePerGas ?? 0n, 'gwei'), 'gwei');
+	console.log('Max fee:        ', ethers.formatUnits((feeData.maxFeePerGas ?? 0n) + PRIORITY_FEE, 'gwei'), 'gwei');
 	console.log('─────────────────────────────────────────────────────────────');
 	console.log('Target time:    ', targetDate);
 	console.log('Current block:  ', currentBlock, `(t=${currentTimestamp})`);
@@ -173,11 +175,15 @@ async function main() {
 
 	if (secondsUntilTarget > 1000) {
 		console.warn(
-			`WARN: Target is ${secondsUntilTarget}s away. Run again ~1 block before the auction opens for the most accurate block number.`
+			`WARN: Target is ${secondsUntilTarget}s away. Run again ~50 block before the auction opens for the most accurate block number.`
 		);
 	}
 
-	return;
+	const broadcast = process.argv.includes('true');
+	if (!broadcast) {
+		console.log('\n(read-only) Pass "true" to broadcast.');
+		return;
+	}
 
 	console.log('\nBroadcasting to builders...');
 	await Promise.all(
