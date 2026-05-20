@@ -22,6 +22,10 @@ const PATH =
 
 // Unix timestamp when the auction price hits your target.
 // The script calculates the block number from this — run it ~1 block (~12s) before.
+// const EXPIRATION_TIMESTAMP = 1779308495; // Wed May 20 2026 20:21:35 UTC
+// delta step: 4699003403458429240894855/1e18/86400= 54.386613466 ZCHF/sec
+// link to market price: 1680/54.386613466= 30.89sec before expiration
+// target: 1779308495-1680/54.386613466= Math.ceil -> 1779308465
 const TARGET_TIMESTAMP = 1779308465; // Wed May 20 2026 20:21:05 UTC
 
 // Ethereum average block time in seconds
@@ -34,7 +38,7 @@ const PRIORITY_FEE = ethers.parseUnits('5', 'gwei');
 // Block window around the target block to submit bundles for.
 // Covers price drift: if the arb isn't valid at block N it may be at N+1..+6.
 // Each offset gets its own UUID so they're independently cancellable.
-export const BLOCK_OFFSETS = [-1, 0, 1, 2, 3, 4, 5, 6];
+export const BLOCK_OFFSETS = [-3, -2, -1, 0, 1, 2, 3, 4, 5];
 
 // Base UUID — offset suffix appended per block: ...-1, -0, +1, +2 ... +6
 export const BUNDLE_UUID = 'frankencoin-bid-challenge-6';
@@ -50,12 +54,12 @@ export function bundleUuid(offset: number): string {
 // uuid: true  = supports cancel-endpoint (eth_cancelBundle by replacementUuid)
 // uuid: false = no cancel-endpoint support (submit-only)
 export const BUILDERS = [
-	{ name: 'Titan',      url: 'https://rpc.titanbuilder.xyz',         auth: false, uuid: true },
-	{ name: 'Flashbots',  url: 'https://rpc.flashbots.net',            auth: true,  uuid: true },
-	{ name: 'Beaver',     url: 'https://mevshare-rpc.beaverbuild.org', auth: false, uuid: true },
-	{ name: 'Eureka',     url: 'https://rpc.eurekabuilder.xyz',        auth: false, uuid: true },
-	{ name: 'Quasar',     url: 'https://rpc.quasar.win',               auth: false, uuid: true },
-	{ name: 'JetBuilder', url: 'https://rpc.mevshare.jetbldr.xyz',     auth: false, uuid: true },
+	{ name: 'Titan', url: 'https://rpc.titanbuilder.xyz', auth: false, uuid: true },
+	{ name: 'Flashbots', url: 'https://rpc.flashbots.net', auth: true, uuid: true },
+	{ name: 'Beaver', url: 'https://mevshare-rpc.beaverbuild.org', auth: false, uuid: true },
+	{ name: 'Eureka', url: 'https://rpc.eurekabuilder.xyz', auth: false, uuid: true },
+	{ name: 'Quasar', url: 'https://rpc.quasar.win', auth: false, uuid: true },
+	{ name: 'JetBuilder', url: 'https://rpc.mevshare.jetbldr.xyz', auth: false, uuid: true },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -148,6 +152,7 @@ async function main() {
 
 	console.log('─── Frankencoin Private Bid ──────────────────────────────────');
 	console.log('Wallet:         ', signer.address, `(${ethers.formatEther(balance)} ETH)`);
+	console.log('Nonce:          ', nonce);
 	console.log('FlashBidder:    ', FLASH_BIDDER);
 	console.log('Challenge:      ', CHALLENGE_INDEX);
 	console.log('Amount:         ', ethers.formatEther(AMOUNT), 'WETH');
@@ -157,8 +162,8 @@ async function main() {
 	console.log('Target time:    ', targetDate);
 	console.log('Current block:  ', currentBlock, `(t=${currentTimestamp})`);
 	console.log('Δ seconds:      ', secondsUntilTarget, `(~${blocksUntilTarget} blocks)`);
-	console.log('Target blocks:  ', BLOCK_OFFSETS.map(o => targetBlock + o).join(', '));
-	console.log('UUIDs:          ', BLOCK_OFFSETS.map(bundleUuid).join(', '));
+	console.log('Target blocks:');
+	BLOCK_OFFSETS.forEach((o) => console.log(`    [${o >= 0 ? '+' : ''}${o}]  ${targetBlock + o}  (${bundleUuid(o)})`));
 	console.log('─────────────────────────────────────────────────────────────');
 
 	if (secondsUntilTarget < 0) {
@@ -166,17 +171,25 @@ async function main() {
 		process.exit(1);
 	}
 
-	if (secondsUntilTarget > 120) {
-		console.warn(`WARN: Target is ${secondsUntilTarget}s away. Run again ~1 block before the auction opens for the most accurate block number.`);
+	if (secondsUntilTarget > 1000) {
+		console.warn(
+			`WARN: Target is ${secondsUntilTarget}s away. Run again ~1 block before the auction opens for the most accurate block number.`
+		);
 	}
+
+	return;
 
 	console.log('\nBroadcasting to builders...');
 	await Promise.all(
-		BLOCK_OFFSETS.flatMap(offset =>
-			BUILDERS.map(b => submitToBuilder(b, signedTx, targetBlock + offset, offset, signer))
+		BLOCK_OFFSETS.flatMap((offset) =>
+			BUILDERS.map((b) => submitToBuilder(b, signedTx, targetBlock + offset, offset, signer))
 		)
 	);
-	console.log(`\nWindow: blocks ${targetBlock - 1} → ${targetBlock + 6} (~${(BLOCK_OFFSETS.length * BLOCK_TIME)}s). Cancel with: yarn frankencoin:cancel`);
+	console.log(
+		`\nWindow: blocks ${targetBlock - 1} → ${targetBlock + 6} (~${
+			BLOCK_OFFSETS.length * BLOCK_TIME
+		}s). Cancel with: yarn frankencoin:cancel`
+	);
 }
 
 main().catch((err) => {
