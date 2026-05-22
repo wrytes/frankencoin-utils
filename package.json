@@ -14,6 +14,8 @@
 	"scripts": {
 		"wallet": "npx ts-node helper/wallet.info.ts",
 		"wallet:info": "npx ts-node helper/wallet.info.ts",
+		"frankencoin:bid": "npx ts-node scripts/frankencoin-bid.ts",
+		"frankencoin:cancel": "npx ts-node scripts/frankencoin-cancel.ts",
 		"compile": "npx hardhat compile",
 		"test": "npx hardhat test",
 		"coverage": "npx hardhat coverage",
