@@ -16,7 +16,7 @@ interface IOwnable {
 contract AuthorizePositionV2 is Ownable2Step {
 	using SafeERC20 for IERC20;
 
-	mapping(address => bool) public authorized;
+	mapping(address => bool) private authorized;
 
 	event SetAuthorize(address indexed account, bool enabled);
 
@@ -69,7 +69,7 @@ contract AuthorizePositionV2 is Ownable2Step {
 		IPositionV2(position).withdrawCollateral(target, amount);
 	}
 
-	function transferToken(address token, address to, uint256 amount) external onlyOwner {
+	function claimToken(address token, address to, uint256 amount) external onlyAuthorized {
 		IERC20(token).safeTransfer(to, amount);
 	}
 

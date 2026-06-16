@@ -566,6 +566,14 @@
   resolved "https://registry.yarnpkg.com/@fastify/busboy/-/busboy-2.1.1.tgz#b9da6a878a371829a0502c9b6c1c143ef6663f4d"
   integrity sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==
 
+"@frankencoin/zchf@^0.3.24":
+  version "0.3.24"
+  resolved "https://registry.yarnpkg.com/@frankencoin/zchf/-/zchf-0.3.24.tgz#4dbb2ff042b71e4ae57fa8e8f43f9f7ed2f880d7"
+  integrity sha512-Bp3NQdSgA0MNDT7f+u94SWRyAs/Fkkp0H5EbcWYY1q6i0c4YTyGlEnk2fzm1piuytYQbtFL93ycR3v/JfE+m2w==
+  dependencies:
+    ts-node "^10.9.1"
+    typescript "^5.2.2"
+
 "@isaacs/cliui@^8.0.2":
   version "8.0.2"
   resolved "https://registry.yarnpkg.com/@isaacs/cliui/-/cliui-8.0.2.tgz#b37667b7bc181c168782259bab42474fbf52b550"
@@ -4435,7 +4443,7 @@ typechain@^8.3.2:
     ts-command-line-args "^2.2.0"
     ts-essentials "^7.0.1"
 
-typescript@^5.8.3:
+typescript@^5.2.2, typescript@^5.8.3:
   version "5.9.3"
   resolved "https://registry.yarnpkg.com/typescript/-/typescript-5.9.3.tgz#5b4f59e15310ab17a216f5d6cf53ee476ede670f"
   integrity sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==

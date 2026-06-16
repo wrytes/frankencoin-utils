@@ -10,15 +10,15 @@ describe('EquityExtraction', function () {
 	const EQUITY_ADDR = '0x1bA26788dfDe592fec8bcB0Eaff472a42BE341B2'; // FPS
 	const ZCHF_WHALE = '0x9642b23Ed1E01Df1092B92641051881a322F5D4E';
 
-	const FORK_BLOCK = 25316349;
-	const INVEST_AMOUNT = ethers.parseEther('100000');
+	const FORK_BLOCK = 25321382;
+	const INVEST_AMOUNT = ethers.parseEther('26000');
 
 	// Simulated interest: position notional × annualInterestPPM
 	// e.g. 4 mio × 1.5% = 60 000 ZCHF
 	const POSITION_SIZE_M = 4n;
 	const RATE_PPM = 15_000n;
 	// const INTEREST_AMOUNT = (POSITION_SIZE_M * ethers.parseEther('1000000') * RATE_PPM) / 1_000_000n;
-	const INTEREST_AMOUNT = ethers.parseEther('140000');
+	const INTEREST_AMOUNT = ethers.parseEther('100000');
 
 	// ── Signers / contracts ────────────────────────────────────────────────────
 

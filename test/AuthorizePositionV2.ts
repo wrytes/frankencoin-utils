@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
-import { AuthorizePositionV2 } from '../typechain';
+import { AuthorizePositionV2, MockOwnable } from '../typechain';
 import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 
 describe('AuthorizePositionV2', function () {
@@ -64,7 +64,7 @@ describe('AuthorizePositionV2', function () {
 	// ---------------------------------------------------------------------------------------
 
 	describe('claimOwnership()', function () {
-		let mockPosition: Awaited<ReturnType<typeof ethers.deployContract>>;
+		let mockPosition: MockOwnable;
 
 		before(async function () {
 			// deploy a plain Ownable contract as the mock position, owned by owner
@@ -88,10 +88,9 @@ describe('AuthorizePositionV2', function () {
 		});
 
 		it('non-owner reverts', async function () {
-			await expect(auth.connect(other).claimOwnership(await mockPosition.getAddress())).to.be.revertedWithCustomError(
-				auth,
-				'OwnableUnauthorizedAccount'
-			);
+			await expect(
+				auth.connect(other).claimOwnership(await mockPosition.getAddress())
+			).to.be.revertedWithCustomError(auth, 'OwnableUnauthorizedAccount');
 		});
 	});
 });
