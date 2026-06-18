@@ -57,6 +57,7 @@ describe('RollerPositionV2', function () {
 		sender = await ethers.getSigner(SENDER);
 		whale = await ethers.getSigner(ZCHF_WHALE);
 
+		// @ts-ignore
 		zchf = await ethers.getContractAt('@openzeppelin/contracts/token/ERC20/IERC20.sol:IERC20', ZCHF_ADDR);
 		sourcePos = await ethers.getContractAt('IPositionV2', SOURCE_ADDR);
 		targetPos = await ethers.getContractAt('IPositionV2', TARGET_ADDR);
@@ -137,6 +138,7 @@ describe('RollerPositionV2', function () {
 		before(async function () {
 			rollerAddr = await roller.getAddress();
 			collateralAddr = await sourcePos.collateral();
+			// @ts-ignore
 			collateral = await ethers.getContractAt(
 				'@openzeppelin/contracts/token/ERC20/IERC20.sol:IERC20',
 				collateralAddr
