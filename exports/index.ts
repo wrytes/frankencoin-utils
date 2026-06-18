@@ -18,5 +18,8 @@ export * from './abis/BidderMorphoV2Ownable';
 
 export * from './abis/LeverageRealUnit';
 
+export * from './abis/IAuthorizePositionV2';
+export * from './abis/IRollerPositionV2';
+
 // deployment params
 // export * as BackendWalletParams from '../ignition/params/BackendWallet';
