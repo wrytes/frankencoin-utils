@@ -145,7 +145,7 @@ describe('RollerPositionV2', function () {
 			sourceCollBefore = await collateral.balanceOf(SOURCE_ADDR);
 
 			// seed vault with ZCHF to cover any rounding shortfall in repayment
-			await zchf.connect(whale).transfer(VAULT_ADDR, VAULT_SEED);
+			// await zchf.connect(whale).transfer(VAULT_ADDR, VAULT_SEED);
 
 			const reservePPM = await sourcePos.reserveContribution();
 			const computedRepayment = (sourceMintedBefore * (1_000_000n - BigInt(reservePPM))) / 1_000_000n;
@@ -186,7 +186,11 @@ describe('RollerPositionV2', function () {
 			console.log('Collateral amt  :', rolledEvent!.args.collateral.toString());
 			console.log('Repaid (event)  :', ethers.formatEther(rolledEvent!.args.repaid), 'ZCHF');
 			console.log('Vault ZCHF      :', ethers.formatEther(vaultZchfAfter), 'ZCHF');
-			console.log('Vault ZCHF diff :', ethers.formatEther(vaultZchfAfter - vaultZchfBefore + computedRepayment), 'ZCHF (net vs seed)');
+			console.log(
+				'Vault ZCHF diff :',
+				ethers.formatEther(vaultZchfAfter - vaultZchfBefore + computedRepayment),
+				'ZCHF (net vs seed)'
+			);
 		});
 
 		it('roller is no longer authorized after roll', async function () {

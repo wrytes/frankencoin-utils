@@ -77,14 +77,14 @@ contract RollerPositionV2 is IMorphoFlashLoanCallback {
 
 	function _getRepayment(address source) internal view returns (uint256) {
 		IPositionV2 pos = IPositionV2(source);
-		return (pos.minted() * (1_000_000 - uint256(pos.reserveContribution())) - 1) / 1_000_000;
+		return (pos.minted() * (1_000_000 - uint256(pos.reserveContribution()))) / 1_000_000;
 	}
 
 	function _getTotalMint(address target, uint256 amount, uint40 expiration) internal view returns (uint256) {
 		IPositionV2 pos = IPositionV2(target);
-		uint256 feePPM = (uint256(pos.annualInterestPPM()) * (expiration - block.timestamp) - 1) / 365 days;
+		uint256 feePPM = (uint256(pos.annualInterestPPM()) * (expiration - block.timestamp)) / 365 days;
 		uint256 payoutPPM = 1_000_000 - uint256(pos.reserveContribution()) - feePPM;
-		return (amount * 1_000_000) / payoutPPM;
+		return ((amount + 1) * 1_000_000 - 1) / payoutPPM + 1;
 	}
 
 	// ---------------------------------------------------------------------------------------
