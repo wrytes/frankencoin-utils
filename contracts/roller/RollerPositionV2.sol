@@ -35,7 +35,6 @@ contract RollerPositionV2 is IMorphoFlashLoanCallback {
 	}
 
 	error NotMorpho();
-	error NotOwner();
 	error OwnerMismatch();
 	error NoCollateral();
 	error InsufficientMint(uint256 desired, uint256 available);
@@ -52,15 +51,14 @@ contract RollerPositionV2 is IMorphoFlashLoanCallback {
 
 	/**
 	 * @notice Roll a source position into a fresh clone of target via a collateral flash loan.
+	 * Caller must be authorized by `vault`, and `vault` must own `source`.
 	 *
-	 * Prerequisite: the vault that owns `source` must have called setAuthorize(address(this), true)
-	 * before this call, and revoke it afterwards. Expected atomic workflow:
-	 *   1. vault.setAuthorize(roller, true)
-	 *   2. roller.execute(source, target, expiration)
-	 *   3. vault.setAuthorize(roller, false)
+	 * Prerequisite: `vault` must authorize this roller before the call:
+	 *   1. vault.setAuthorize(address(this), true)
+	 *   2. roller.execute(vault, source, target, expiration)
 	 */
 	function execute(address vault, address source, address target, uint256 expiration) external {
-		if (IOwnable(vault).owner() != msg.sender) revert NotOwner();
+		if (!IAuthorizePositionV2(vault).isAuthorized(msg.sender)) revert IAuthorizePositionV2.NotAuthorized();
 		if (IOwnable(source).owner() != vault) revert OwnerMismatch();
 
 		(address coll, uint256 bal) = _collateralOf(source);

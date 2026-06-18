@@ -108,10 +108,10 @@ describe('RollerPositionV2', function () {
 			);
 		});
 
-		it('reverts NotOwner when caller is not vault owner', async function () {
+		it('reverts NotAuthorized when caller is not authorized in vault', async function () {
 			await expect(
 				roller.connect(user).execute(VAULT_ADDR, SOURCE_ADDR, TARGET_ADDR, END_OF_Q3_2026)
-			).to.be.revertedWithCustomError(roller, 'NotOwner');
+			).to.be.revertedWithCustomError(vault, 'NotAuthorized');
 		});
 
 		it('reverts OwnerMismatch when vault does not own source', async function () {
