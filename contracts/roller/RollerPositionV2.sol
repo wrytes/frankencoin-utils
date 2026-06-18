@@ -36,9 +36,9 @@ contract RollerPositionV2 is IMorphoFlashLoanCallback {
 
 	error NotMorpho();
 	error NotOwner();
+	error OwnerMismatch();
 	error NoCollateral();
-	error InsufficientMint();
-	error SourceOwnerMismatch();
+	error InsufficientMint(uint256 desired, uint256 available);
 
 	// ---------------------------------------------------------------------------------------
 
@@ -61,6 +61,7 @@ contract RollerPositionV2 is IMorphoFlashLoanCallback {
 	 */
 	function execute(address vault, address source, address target, uint256 expiration) external {
 		if (IOwnable(vault).owner() != msg.sender) revert NotOwner();
+		if (IOwnable(source).owner() != vault) revert OwnerMismatch();
 
 		(address coll, uint256 bal) = _collateralOf(source);
 
@@ -105,7 +106,8 @@ contract RollerPositionV2 is IMorphoFlashLoanCallback {
 		address newPos = hub.clone(d.vault, d.target, assets, totalMint, d.expiration);
 
 		// verify received zchf (net of reserve + fee) covers repayment
-		if (zchf.balanceOf(d.vault) < repayment) revert InsufficientMint();
+		uint256 bal = zchf.balanceOf(d.vault);
+		if (bal < repayment) revert InsufficientMint(repayment, bal);
 
 		// repay source debt
 		vault.adjust(d.source, 0, assets, source.price());

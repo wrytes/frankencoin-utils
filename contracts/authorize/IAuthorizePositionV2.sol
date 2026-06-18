@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-interface IAuthorizePositionV2 {
+import {IOwnable} from '../utils/IOwnable.sol';
+
+interface IAuthorizePositionV2 is IOwnable {
 	event SetAuthorize(address indexed account, bool enabled);
 
 	error NotAuthorized();
