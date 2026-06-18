@@ -5,10 +5,7 @@ import {Ownable2Step, Ownable} from '@openzeppelin/contracts/access/Ownable2Step
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import {IPositionV2} from '../frankencoin/IPositionV2.sol';
-
-interface IOwnable {
-	function transferOwnership(address newOwner) external;
-}
+import {IOwnable} from '../utils/IOwnable.sol';
 
 /// @title AuthorizePositionV2
 /// @notice Vault controller that holds ownership of one or more Frankencoin V2 positions and
