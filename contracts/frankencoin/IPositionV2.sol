@@ -4,8 +4,9 @@ pragma solidity ^0.8.0;
 import './IERC20.sol';
 import './IReserve.sol';
 import './IFrankencoin.sol';
+import {IOwnable} from '../utils/IOwnable.sol';
 
-interface IPositionV2 {
+interface IPositionV2 is IOwnable {
 	function initialize(address parent, uint40 _expiration) external;
 
 	function hub() external view returns (address);
