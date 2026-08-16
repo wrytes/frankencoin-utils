@@ -44,7 +44,7 @@ const SWAP_FEES = [3000, 100, 100];
 // too tight and the tx reverts, too loose and it offers little real slippage protection.
 const AMOUNT_IN_MAXIMUM = 30_000_000n; // 0.30 cbBTC
 
-const OUT_PATH = 'scripts/custom/close-position-safe-batch.json';
+const OUT_PATH = 'scripts/custom/close-position/close-position-safe-batch.json';
 const CHAIN_ID = '1'; // mainnet
 const SALT = ethers.id(`frankencoin/CustomClosePosition/${POSITION_ADDR}`);
 
