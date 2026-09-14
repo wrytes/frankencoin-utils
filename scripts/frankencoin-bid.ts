@@ -9,31 +9,34 @@ dotenv.config();
 // BidderMorphoV2Sender deployment
 const FLASH_BIDDER = '0x49b98e9d1a7dc863d3dbe457dc26ed713d7a9a31';
 
+// MintingHubV2 deployment
+const HUB = '0xDe12B620A8a714476A97EfD14E6F7180Ca653557';
+
+// Uniswap V3 QuoterV2 deployment (used to read live market price along PATH)
+const QUOTER = '0x61fFE014bA17989E743c5F6cB21bF9697530B21e';
+
 // Challenge number on MintingHubV2
-const CHALLENGE_INDEX = 6;
+const CHALLENGE_INDEX = 7;
 
 // Max collateral size to bid (0 = full challenge size)
-const AMOUNT = 2_000_000_000_000_000_000n; // 2 WETH in wei
+const AMOUNT: bigint = 2_000_000_000_000_000_000n; // 2 WETH in wei
 
 // Uniswap V3 path: WETH -[100bps]-> USDT -[100bps]-> ZCHF
 // Encoding: token(20) | fee(3) | token(20) | fee(3) | token(20)
 const PATH =
 	'0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000064dac17f958d2ee523a2206206994597c13d831ec7000064b58e61c3098d85632df34eecfb899a1ed80921cb';
 
-// Unix timestamp when the auction price hits your target.
-// The script calculates the block number from this — run it ~1 block (~12s) before.
-// const EXPIRATION_TIMESTAMP = 1779308495; // Wed May 20 2026 20:21:35 UTC
-// delta step: 4699003403458429240894855/1e18/86400= 54.386613466 ZCHF/sec
-// link to market price: 1680/54.386613466= 30.89sec before expiration
-// target: 1779308495-1680/54.386613466= Math.ceil -> 1779308465
-const TARGET_TIMESTAMP = 1779308465; // Wed May 20 2026 20:21:05 UTC
+// How far below the live market swap value (quoted via PATH) we want the
+// declining auction price to be before we bid. Covers gas + slippage + safety
+// buffer. TARGET_TIMESTAMP is derived from this at runtime — see computeTargetTimestamp().
+const PROFIT_MARGIN = ethers.parseEther('100'); // 100 ZCHF
 
 // Ethereum average block time in seconds
 const BLOCK_TIME = 12;
 
 // Priority fee paid to block builders.
 // 1–2 gwei = normal, 5 gwei = strong, 10+ gwei = aggressive.
-const PRIORITY_FEE = ethers.parseUnits('5', 'gwei');
+const PRIORITY_FEE = ethers.parseUnits('1', 'gwei');
 
 // Block window around the target block to submit bundles for.
 // Covers price drift: if the arb isn't valid at block N it may be at N+1..+6.
@@ -41,7 +44,7 @@ const PRIORITY_FEE = ethers.parseUnits('5', 'gwei');
 export const BLOCK_OFFSETS = [-3, -2, -1, 0, 1, 2, 3];
 
 // Base UUID — offset suffix appended per block: ...-1, -0, +1, +2 ... +6
-export const BUNDLE_UUID = 'frankencoin-bid-challenge-6';
+export const BUNDLE_UUID = 'frankencoin-bid-challenge-7';
 
 export function bundleUuid(offset: number): string {
 	const sign = offset > 0 ? '+' : '-';
@@ -65,6 +68,65 @@ export const BUILDERS = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 const IFACE = new ethers.Interface(BidderMorphoV2OwnableABI);
+
+const HUB_ABI = [
+	'function challenges(uint256) view returns (address challenger, uint40 start, address position, uint256 size)',
+];
+const POSITION_ABI = ['function challengePeriod() view returns (uint40)', 'function price() view returns (uint256)'];
+const QUOTER_ABI = [
+	'function quoteExactInput(bytes path, uint256 amountIn) returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
+];
+
+// Computes the timestamp at which the challenge's Dutch-auction price is
+// expected to drop to (live market value of the bid, via PATH) - PROFIT_MARGIN.
+//
+// MintingHubV2 auction curve (see _calculatePrice in MintingHubV2.sol):
+//   decayStart = challenge.start + phase   (price stays flat at liqPrice until here)
+//   decayEnd   = decayStart + phase        (price is 0 from here on)
+//   offer(t)   = liqPrice * (decayEnd - t) / phase * bidAmount / 1e18
+async function computeTargetTimestamp(provider: ethers.Provider): Promise<{
+	targetTimestamp: number;
+	decayStart: number;
+	decayEnd: number;
+	liqPrice: bigint;
+	marketValue: bigint;
+	bidAmount: bigint;
+}> {
+	const hub = new ethers.Contract(HUB, HUB_ABI, provider);
+	const quoter = new ethers.Contract(QUOTER, QUOTER_ABI, provider);
+
+	const challenge = await hub.challenges(CHALLENGE_INDEX);
+	const bidAmount = AMOUNT === 0n || AMOUNT > challenge.size ? challenge.size : AMOUNT;
+
+	const position = new ethers.Contract(challenge.position, POSITION_ABI, provider);
+	const [phaseRaw, liqPriceRaw, quote] = await Promise.all([
+		position.challengePeriod(),
+		position.price(),
+		quoter.quoteExactInput.staticCall(PATH, bidAmount),
+	]);
+	const phase: bigint = BigInt(phaseRaw);
+	const liqPrice: bigint = BigInt(liqPriceRaw);
+	const marketValue: bigint = quote[0];
+
+	const decayStart = BigInt(challenge.start) + phase;
+	const decayEnd = decayStart + phase;
+
+	const targetValue = marketValue > PROFIT_MARGIN ? marketValue - PROFIT_MARGIN : 0n;
+	// timeLeft such that liqPrice * timeLeft / phase * bidAmount / 1e18 == targetValue
+	let timeLeft = (targetValue * phase * 10n ** 18n) / (liqPrice * bidAmount);
+	if (timeLeft > phase) timeLeft = phase; // already profitable at decayStart
+
+	const targetTimestamp = Number(decayEnd - timeLeft);
+
+	return {
+		targetTimestamp,
+		decayStart: Number(decayStart),
+		decayEnd: Number(decayEnd),
+		liqPrice,
+		marketValue,
+		bidAmount,
+	};
+}
 
 // Flashbots signs the keccak256 hex string as text (not raw bytes)
 async function flashbotsHeader(signer: ethers.Wallet, body: string): Promise<string> {
@@ -123,6 +185,15 @@ async function main() {
 	const currentBlock = latestBlock.number;
 	const currentTimestamp = latestBlock.timestamp;
 
+	const {
+		targetTimestamp: TARGET_TIMESTAMP,
+		decayStart,
+		decayEnd,
+		liqPrice,
+		marketValue,
+		bidAmount,
+	} = await computeTargetTimestamp(provider);
+
 	const secondsUntilTarget = TARGET_TIMESTAMP - currentTimestamp;
 	const blocksUntilTarget = Math.ceil(secondsUntilTarget / BLOCK_TIME);
 	const targetBlock = currentBlock + blocksUntilTarget;
@@ -155,8 +226,23 @@ async function main() {
 	console.log('Nonce:          ', nonce);
 	console.log('FlashBidder:    ', FLASH_BIDDER);
 	console.log('Challenge:      ', CHALLENGE_INDEX);
-	console.log('Amount:         ', ethers.formatEther(AMOUNT), 'WETH');
+	console.log(
+		'Amount:         ',
+		ethers.formatEther(AMOUNT),
+		'WETH',
+		bidAmount !== AMOUNT ? `(capped to ${ethers.formatEther(bidAmount)} WETH — challenge size)` : ''
+	);
 	console.log('Path:            WETH → USDT → ZCHF (0.01% / 0.01%)');
+	console.log('Liq. price:     ', ethers.formatEther(liqPrice), 'ZCHF/WETH');
+	console.log(
+		'Market value:   ',
+		ethers.formatEther(marketValue),
+		'ZCHF',
+		`(quoted for ${ethers.formatEther(bidAmount)} WETH via PATH)`
+	);
+	console.log('Profit margin:  ', ethers.formatEther(PROFIT_MARGIN), 'ZCHF');
+	console.log('Decay start:    ', new Date(decayStart * 1000).toUTCString(), `(${decayStart})`);
+	console.log('Decay end:      ', new Date(decayEnd * 1000).toUTCString(), `(${decayEnd})`);
 	console.log('Priority fee:   ', ethers.formatUnits(PRIORITY_FEE, 'gwei'), 'gwei');
 	console.log('Base fee:       ', ethers.formatUnits(feeData.maxFeePerGas ?? 0n, 'gwei'), 'gwei');
 	console.log('Max fee:        ', ethers.formatUnits((feeData.maxFeePerGas ?? 0n) + PRIORITY_FEE, 'gwei'), 'gwei');
@@ -180,7 +266,9 @@ async function main() {
 	console.log('─────────────────────────────────────────────────────────────');
 
 	if (secondsUntilTarget < 0) {
-		console.error('ERROR: Target timestamp is in the past. Check TARGET_TIMESTAMP.');
+		console.error(
+			'ERROR: Target timestamp is in the past — the auction price is already at or below target. Check PROFIT_MARGIN or bid immediately.'
+		);
 		process.exit(1);
 	}
 
