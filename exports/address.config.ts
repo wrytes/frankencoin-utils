@@ -7,6 +7,8 @@ export interface ChainAddress {
 	flashloanFrankencoin: Address;
 
 	rollerPositionV2: Address;
+
+	bidderMorphoV2Sender: Address;
 }
 
 export const ADDRESS: Record<number, ChainAddress> = {
@@ -17,5 +19,8 @@ export const ADDRESS: Record<number, ChainAddress> = {
 
 		// AuthorizePositionV2 utils
 		rollerPositionV2: '0x77350F85C1570393be6Fda586CF978608Ba72786',
+
+		// Bidder utils
+		bidderMorphoV2Sender: '0xa81aA67186Ff24077E1ff974940ff9C5755B6Dd6',
 	},
 };

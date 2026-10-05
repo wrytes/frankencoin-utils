@@ -15,6 +15,7 @@ export * from './abis/ISavingsToken';
 export * from './abis/LeverageMorpho';
 export * from './abis/LeverageMorphoFactory';
 export * from './abis/BidderMorphoV2Ownable';
+export * from './abis/BidderMorphoV2Sender';
 
 export * from './abis/LeverageRealUnit';
 
