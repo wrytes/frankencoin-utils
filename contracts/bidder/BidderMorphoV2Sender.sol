@@ -10,7 +10,6 @@ import {ISwapRouter} from '@uniswap/v3-periphery/contracts/interfaces/ISwapRoute
 import {IMorpho} from '../morpho/IMorpho.sol';
 import {IMorphoFlashLoanCallback} from '../morpho/IMorphoCallbacks.sol';
 
-import {IFrankencoin} from '../frankencoin/IFrankencoin.sol';
 import {IMintingHubV2Bidder} from '../frankencoin/IMintingHubV2Bidder.sol';
 import {IPositionV2} from '../frankencoin/IPositionV2.sol';
 
@@ -25,7 +24,7 @@ contract BidderMorphoV2Sender is IMorphoFlashLoanCallback {
 	IMintingHubV2Bidder public immutable hub;
 
 	// events
-	event Executed(uint256 bid, uint256 swapIn, uint256 swapOut);
+	event Executed(address indexed collateral, uint256 flash, uint256 swapIn, uint256 swapOut);
 
 	// errors
 	error NotMorpho();
@@ -113,6 +112,6 @@ contract BidderMorphoV2Sender is IMorphoFlashLoanCallback {
 		// forceApprove for flashloan repayment
 		zchf.forceApprove(address(morpho), assets);
 
-		emit Executed(assets, size, amountOut);
+		emit Executed(collateral, assets, size, amountOut);
 	}
 }
